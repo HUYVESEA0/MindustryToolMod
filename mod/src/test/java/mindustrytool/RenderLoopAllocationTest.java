@@ -159,18 +159,20 @@ class RenderLoopAllocationTest extends MindustryTestEnv {
 
         // Measure steady state
         long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        float lastBadgeSize = 0f;
+        float lastHealthFrac = 0f;
+        float lastAmmoFrac = 0f;
         for (int frame = 0; frame < 60; frame++) {
-            float badgeSize = feature.calculateBadgeSize(2);
-            float healthFrac = feature.getTargetHealthFraction(null);
-            float ammoFrac = feature.calculateAmmoFraction(null);
-
-            assertTrue(badgeSize > 0f);
-            assertEquals(1f, healthFrac, 0.001f);
-            assertEquals(1f, ammoFrac, 0.001f);
+            lastBadgeSize = feature.calculateBadgeSize(2);
+            lastHealthFrac = feature.getTargetHealthFraction(null);
+            lastAmmoFrac = feature.calculateAmmoFraction(null);
         }
         long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
         long allocated = endAlloc - startAlloc;
 
+        assertTrue(lastBadgeSize > 0f);
+        assertEquals(1f, lastHealthFrac, 0.001f);
+        assertEquals(1f, lastAmmoFrac, 0.001f);
         assertEquals(0L, allocated, "Turret badge and target metric calculations must allocate 0 bytes");
     }
 

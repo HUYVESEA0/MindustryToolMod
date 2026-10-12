@@ -26,11 +26,13 @@ class UniversalScaleTest extends MindustryTestEnv {
     void clearSettings() {
         Core.settings.clear();
         ModSettings.universalScale.set(1f);
+        flushEffects();
     }
 
     @AfterEach
     void resetSettings() {
         ModSettings.universalScale.set(1f);
+        flushEffects();
         Core.settings.clear();
     }
 
@@ -44,6 +46,7 @@ class UniversalScaleTest extends MindustryTestEnv {
     @Test
     void universalScale_persistsToCoreSettings() {
         ModSettings.universalScale.set(1.2f);
+        flushEffects();
 
         assertEquals(1.2f, Core.settings.getFloat("mindustrytool.settings.universal-scale", 0f), 0.0001f);
         assertEquals(1.2f, ModSettings.universalScale.get(), 0.0001f);
