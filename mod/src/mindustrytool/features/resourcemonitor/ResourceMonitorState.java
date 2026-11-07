@@ -1,46 +1,64 @@
-package mindustrytool.features.teamresource;
+package mindustrytool.features.resourcemonitor;
 
 import arc.func.Cons;
 import arc.graphics.Color;
 import arc.struct.ObjectIntMap;
+import arc.struct.ObjectMap;
 import arc.struct.ObjectSet;
 import arc.struct.Seq;
 import arc.util.Interval;
 import arc.util.Log;
 import arc.util.Nullable;
+import arc.util.Time;
+import java.util.Comparator;
 import mindustry.Vars;
 import mindustry.core.UI;
 import mindustry.game.Team;
+import mindustry.game.Teams.TeamData;
 import mindustry.gen.Building;
+import mindustry.gen.Groups;
 import mindustry.graphics.Pal;
 import mindustry.type.Item;
 import mindustry.type.UnitType;
 import mindustry.world.blocks.power.PowerGraph;
 import mindustry.world.modules.ItemModule;
 import solim.reactive.Signal;
-import mindustry.gen.Groups;
 
-import java.util.Comparator;
-
-public class TeamResourceState {
+public class ResourceMonitorState {
     private final ObjectSet<Item> usedItems = new ObjectSet<>();
     private final ObjectSet<UnitType> usedUnits = new ObjectSet<>();
     private final Interval timer = new Interval(2);
 
-    private @Nullable TeamResourceFeature feature;
-    private @Nullable Team selectedTeam;
+    private @Nullable ResourceMonitorFeature feature;
+    private @Nullable Team selectedTeam = Team.sharded;
     private @Nullable ItemModule coreItems;
     private final ObjectIntMap<Item> lastSnapshot = new ObjectIntMap<>();
     private final ObjectIntMap<Item> rateDisplay = new ObjectIntMap<>();
+    private float lastRateUpdateTime = -1f;
 
     private boolean viewingStats = false;
     private boolean holdingForStats = false;
     private final Seq<PowerGraph> teamGraphs = new Seq<>();
     private final ObjectIntMap<UnitType> lastUnitCounts = new ObjectIntMap<>();
-    private int lastBuildingCount = -1;
+    private final ObjectMap<Item, ItemFormatEntry> itemFormatCache = new ObjectMap<>();
+    private final ObjectIntMap<UnitType> unitFormatCountCache = new ObjectIntMap<>();
+    private final ObjectMap<UnitType, String> unitFormatTextCache = new ObjectMap<>();
+    private long cachedBalanceLong = Long.MIN_VALUE;
+    private boolean cachedBalancePositive = false;
+    private String cachedBalanceText = "+0";
+    private long cachedStoredLong = Long.MIN_VALUE;
+    private long cachedCapacityLong = Long.MIN_VALUE;
+    private String cachedStoredText = "0 / 0";
     private float lastTotalBalance = 0f;
     private float lastTotalStored = 0f;
     private float lastTotalCapacity = 0f;
+
+    private static final class ItemFormatEntry {
+        int amount = Integer.MIN_VALUE;
+        int rate = Integer.MIN_VALUE;
+        int mode = -1;
+        CharSequence text = "0";
+    }
 
     private final Seq<Team> tempTeams = new Seq<>();
     private final ObjectSet<PowerGraph> tempPowerGraphs = new ObjectSet<>();
@@ -63,12 +81,13 @@ public class TeamResourceState {
     public final Signal<Seq<Team>> validTeamsSignal = Signal.of(new Seq<>());
     public final Signal<Seq<Item>> usedItemsSignal = Signal.of(new Seq<>());
     public final Signal<Seq<UnitType>> usedUnitsSignal = Signal.of(new Seq<>());
+    public final Signal<Seq<PowerGraph>> teamGraphsSignal = Signal.of(new Seq<>());
 
-    public TeamResourceState() {
+    public ResourceMonitorState() {
         this(null);
     }
 
-    public TeamResourceState(@Nullable TeamResourceFeature feature) {
+    public ResourceMonitorState(@Nullable ResourceMonitorFeature feature) {
         this.feature = feature;
         if (Vars.player != null && Vars.player.team() != null) {
             this.selectedTeam = Vars.player.team();
@@ -77,20 +96,19 @@ public class TeamResourceState {
         updateValidTeams();
     }
 
-    public void setFeature(@Nullable TeamResourceFeature feature) {
+    public void setFeature(@Nullable ResourceMonitorFeature feature) {
         this.feature = feature;
     }
 
     public void updateValidTeams() {
         tempTeams.clear();
-        if (Vars.state != null && Team.all != null) {
-            for (Team team : Team.all) {
-                if (team != null && team.active()) {
-                    try {
-                        if (team.data() != null && team.data().hasCore()) {
-                            tempTeams.add(team);
-                        }
-                    } catch (Throwable ignored) {
+        if (Vars.state != null && Vars.state.teams != null) {
+            Seq<TeamData> active = Vars.state.teams.getActive();
+            if (active != null) {
+                for (int i = 0; i < active.size; i++) {
+                    TeamData data = active.get(i);
+                    if (data != null && data.team != null && data.hasCore()) {
+                        tempTeams.add(data.team);
                     }
                 }
             }
@@ -108,8 +126,14 @@ public class TeamResourceState {
         usedUnitsSignal.set(new Seq<>());
         lastSnapshot.clear();
         rateDisplay.clear();
+        lastRateUpdateTime = -1f;
         lastUnitCounts.clear();
-        lastBuildingCount = -1;
+        itemFormatCache.clear();
+        unitFormatCountCache.clear();
+        unitFormatTextCache.clear();
+        cachedBalanceLong = Long.MIN_VALUE;
+        cachedStoredLong = Long.MIN_VALUE;
+        cachedCapacityLong = Long.MIN_VALUE;
         lastTotalBalance = 0f;
         lastTotalStored = 0f;
         lastTotalCapacity = 0f;
@@ -121,6 +145,7 @@ public class TeamResourceState {
             selectedTeamSignal.set(Team.sharded);
         }
         teamGraphs.clear();
+        teamGraphsSignal.set(new Seq<>());
         updateValidTeams();
         tickSignal.set(tickSignal.get() + 1);
     }
@@ -238,16 +263,84 @@ public class TeamResourceState {
     public void setSelectedTeam(Team team) {
         this.selectedTeam = team;
         this.selectedTeamSignal.set(team);
+        if (Vars.state != null && Vars.state.isGame()) {
+            this.usedItems.clear();
+            this.usedItemsSignal.set(new Seq<>());
+        }
         this.usedUnits.clear();
         this.usedUnitsSignal.set(new Seq<>());
         lastSnapshot.clear();
         rateDisplay.clear();
+        lastRateUpdateTime = -1f;
+        lastUnitCounts.clear();
+        itemFormatCache.clear();
+        unitFormatCountCache.clear();
+        unitFormatTextCache.clear();
+        cachedBalanceLong = Long.MIN_VALUE;
+        cachedStoredLong = Long.MIN_VALUE;
+        cachedCapacityLong = Long.MIN_VALUE;
         this.teamGraphs.clear();
+        this.teamGraphsSignal.set(new Seq<>());
         tickSignal.set(tickSignal.get() + 1);
     }
 
     public @Nullable ItemModule getCoreItems() {
         return coreItems;
+    }
+
+    void setCoreItems(@Nullable ItemModule coreItems) {
+        this.coreItems = coreItems;
+    }
+
+    void setItemRate(Item item, int rate) {
+        rateDisplay.put(item, rate);
+        itemFormatCache.remove(item);
+    }
+
+    boolean stepRates() {
+        return updateRates();
+    }
+
+    public void refreshZeroFilters() {
+        if (Vars.content != null) {
+            boolean hideZeroItems = feature != null && Boolean.TRUE.equals(feature.hideZeroItemsConfig.get());
+            if (hideZeroItems && coreItems != null) {
+                boolean itemsChanged = false;
+                for (Item item : Vars.content.items()) {
+                    if (coreItems.get(item) <= 0 && usedItems.remove(item)) {
+                        itemsChanged = true;
+                    }
+                }
+                if (itemsChanged) {
+                    Seq<Item> list = new Seq<>();
+                    for (Item item : Vars.content.items()) {
+                        if (usedItems.contains(item)) {
+                            list.add(item);
+                        }
+                    }
+                    usedItemsSignal.set(list);
+                }
+            }
+            boolean hideZeroUnits = feature != null && Boolean.TRUE.equals(feature.hideZeroUnitsConfig.get());
+            if (hideZeroUnits && selectedTeam != null) {
+                boolean unitsChanged = false;
+                for (UnitType unit : Vars.content.units()) {
+                    int count = lastUnitCounts.get(unit, 0);
+                    if (count <= 0 && usedUnits.remove(unit)) {
+                        unitsChanged = true;
+                    }
+                }
+                if (unitsChanged) {
+                    Seq<UnitType> list = new Seq<>();
+                    for (UnitType unit : Vars.content.units()) {
+                        if (usedUnits.contains(unit)) {
+                            list.add(unit);
+                        }
+                    }
+                    usedUnitsSignal.set(list);
+                }
+            }
+        }
     }
 
     public ObjectSet<Item> getUsedItems() {
@@ -283,26 +376,26 @@ public class TeamResourceState {
         lastSnapshot.clear();
     }
 
-    public int getItemAmount(Item item) {
-        return coreItems != null ? coreItems.get(item) : 0;
+    public int getItemAmount(@Nullable Item item) {
+        return item != null && coreItems != null ? coreItems.get(item) : 0;
     }
 
-    public int getItemRate(Item item) {
-        return rateDisplay.get(item, 0);
+    public int getItemRate(@Nullable Item item) {
+        return item != null ? rateDisplay.get(item, 0) : 0;
     }
 
-    public String getFormattedAmount(Item item) {
-        if (coreItems == null) {
+    public String getFormattedAmount(@Nullable Item item) {
+        if (item == null || coreItems == null) {
             return "0";
         }
         return UI.formatAmount(coreItems.get(item));
     }
 
-    public String getFormattedRate(Item item) {
-        if (rateDisplay == null) {
+    public String getFormattedRate(@Nullable Item item) {
+        if (item == null || rateDisplay == null) {
             return "0/s";
         }
-        int rate = rateDisplay.get(item);
+        int rate = rateDisplay.get(item, 0);
         if (rate == 0) {
             return "0/s";
         }
@@ -310,18 +403,12 @@ public class TeamResourceState {
         return prefix + rate + "/s";
     }
 
-    public Color getRateColor(Item item) {
-        if (rateDisplay == null) {
+    public Color getRateColor(@Nullable Item item) {
+        if (item == null || rateDisplay == null) {
             return Color.gray;
         }
-        int rate = rateDisplay.get(item);
-        if (rate > 0) {
-            return Pal.heal;
-        }
-        if (rate < 0) {
-            return Pal.remove;
-        }
-        return Color.gray;
+        int rate = rateDisplay.get(item, 0);
+        return rate > 0 ? Pal.heal : (rate < 0 ? Pal.remove : Color.gray);
     }
 
     public String getUnitCountText(@Nullable UnitType type) {
@@ -334,7 +421,19 @@ public class TeamResourceState {
         }
         try {
             int count = current.data() != null ? current.data().countType(type) : 0;
-            return count > 0 ? UI.formatAmount(count) : "";
+            if (count <= 0) {
+                return (feature != null && !Boolean.TRUE.equals(feature.hideZeroUnitsConfig.get())) ? "0" : "";
+            }
+            if (unitFormatCountCache.get(type, Integer.MIN_VALUE) == count) {
+                String cached = unitFormatTextCache.get(type);
+                if (cached != null) {
+                    return cached;
+                }
+            }
+            String formatted = UI.formatAmount(count);
+            unitFormatCountCache.put(type, count);
+            unitFormatTextCache.put(type, formatted);
+            return formatted;
         } catch (Throwable t) {
             return "";
         }
@@ -350,7 +449,14 @@ public class TeamResourceState {
 
     public String getFormattedPowerBalance() {
         float totalBalance = getTotalPowerBalance();
-        return (totalBalance >= 0 ? "+" : "") + UI.formatAmount((long) (totalBalance * 60));
+        long val = (long) (totalBalance * 60);
+        boolean pos = totalBalance >= 0;
+        if (cachedBalanceLong != val || cachedBalancePositive != pos) {
+            cachedBalanceLong = val;
+            cachedBalancePositive = pos;
+            cachedBalanceText = (pos ? "+" : "") + UI.formatAmount(val);
+        }
+        return cachedBalanceText;
     }
 
     public Color getPowerBalanceColor() {
@@ -374,35 +480,54 @@ public class TeamResourceState {
     }
 
     public String getFormattedStoredPower() {
-        return UI.formatAmount((long) getTotalStoredPower()) + " / " + UI.formatAmount((long) getTotalPowerCapacity());
+        long stored = (long) getTotalStoredPower();
+        long cap = (long) getTotalPowerCapacity();
+        if (cachedStoredLong != stored || cachedCapacityLong != cap) {
+            cachedStoredLong = stored;
+            cachedCapacityLong = cap;
+            cachedStoredText = UI.formatAmount(stored) + " / " + UI.formatAmount(cap);
+        }
+        return cachedStoredText;
     }
 
-    public CharSequence formatItem(Item item) {
-        if (coreItems == null) {
+    public CharSequence formatItem(@Nullable Item item) {
+        if (item == null) {
             return "0";
         }
-
         try {
-            int amount = coreItems.get(item);
+            int amount = coreItems != null ? coreItems.get(item) : 0;
             int rate = rateDisplay.get(item, 0);
+            if (coreItems == null && rate == 0) {
+                return "0";
+            }
 
             boolean alwaysShow = feature == null || Boolean.TRUE.equals(feature.alwaysShowFlowRateConfig.get());
+            int mode = alwaysShow ? 1 : (viewingStats ? 2 : 3);
+            ItemFormatEntry entry = itemFormatCache.get(item);
+            if (entry != null && entry.amount == amount && entry.rate == rate && entry.mode == mode) {
+                return entry.text;
+            }
+            if (entry == null) {
+                entry = new ItemFormatEntry();
+                itemFormatCache.put(item, entry);
+            }
+            entry.amount = amount;
+            entry.rate = rate;
+            entry.mode = mode;
+
             if (alwaysShow) {
-                return formatAmountWithRate(amount, rate);
+                entry.text = formatAmountWithRate(amount, rate);
+                return entry.text;
             }
 
             if (viewingStats) {
-                return formatRate(rate);
+                entry.text = formatRate(rate);
+                return entry.text;
             }
 
-            String color = "[white]";
-            if (rate < 0) {
-                color = "[scarlet]";
-            } else if (rate > 0) {
-                color = "[lime]";
-            }
-
-            return color + UI.formatAmount(amount);
+            String color = rate < 0 ? "[scarlet]" : (rate > 0 ? "[lime]" : "[white]");
+            entry.text = color + UI.formatAmount(amount);
+            return entry.text;
         } catch (Exception e) {
             Log.err("Failed to format item", e);
             return "0";
@@ -419,7 +544,10 @@ public class TeamResourceState {
         }
 
         boolean ratesOrAmountsChanged = false;
-        if (lastSnapshot.size > 0) {
+        float now = Time.time;
+        float elapsedTicks = lastRateUpdateTime >= 0f ? (now - lastRateUpdateTime) : 30f;
+        float elapsedSeconds = elapsedTicks > 0.001f ? (elapsedTicks / 60f) : 0.5f;
+        if (lastSnapshot.size > 0 && elapsedSeconds <= 5f) {
             for (Item item : Vars.content.items()) {
                 if (item != null) {
                     int amount = coreItems.get(item);
@@ -427,7 +555,7 @@ public class TeamResourceState {
                     if (amount != previous) {
                         ratesOrAmountsChanged = true;
                     }
-                    int newRate = (amount - previous) * 2;
+                    int newRate = Math.round((amount - previous) / elapsedSeconds);
                     int oldRate = rateDisplay.get(item, 0);
                     if (newRate != oldRate) {
                         ratesOrAmountsChanged = true;
@@ -438,6 +566,7 @@ public class TeamResourceState {
         } else {
             ratesOrAmountsChanged = true;
         }
+        lastRateUpdateTime = now;
         lastSnapshot.clear();
         for (Item item : Vars.content.items()) {
             if (item != null) {
@@ -453,24 +582,29 @@ public class TeamResourceState {
         }
 
         boolean graphsChanged = false;
-        int currentBuildCount = Groups.build != null ? Groups.build.size() : 0;
-        if (currentBuildCount != lastBuildingCount) {
-            lastBuildingCount = currentBuildCount;
-            tempPowerGraphs.clear();
-            if (Groups.build != null) {
-                Groups.build.each(powerGraphCollector);
+        tempPowerGraphs.clear();
+        if (selectedTeam.data() != null && selectedTeam.data().buildings != null) {
+            Seq<Building> teamBuildings = selectedTeam.data().buildings;
+            for (int i = 0; i < teamBuildings.size; i++) {
+                Building b = teamBuildings.get(i);
+                if (b != null) {
+                    powerGraphCollector.get(b);
+                }
             }
+        } else if (Groups.build != null) {
+            Groups.build.each(powerGraphCollector);
+        }
 
-            tempGraphSeq.clear();
-            for (PowerGraph graph : tempPowerGraphs) {
-                tempGraphSeq.add(graph);
-            }
-            tempGraphSeq.sort(GRAPH_COMPARATOR);
+        tempGraphSeq.clear();
+        for (PowerGraph graph : tempPowerGraphs) {
+            tempGraphSeq.add(graph);
+        }
+        tempGraphSeq.sort(GRAPH_COMPARATOR);
 
-            if (!tempGraphSeq.equals(teamGraphs)) {
-                teamGraphs.set(new Seq<>(tempGraphSeq));
-                graphsChanged = true;
-            }
+        if (!tempGraphSeq.equals(teamGraphs)) {
+            teamGraphs.set(new Seq<>(tempGraphSeq));
+            teamGraphsSignal.set(new Seq<>(tempGraphSeq));
+            graphsChanged = true;
         }
 
         float balance = getTotalPowerBalance();
@@ -492,15 +626,15 @@ public class TeamResourceState {
     }
 
     private CharSequence formatAmountWithRate(int amount, int rate) {
-        String rateText = formatRate(rate);
-        return UI.formatAmount(amount) + " " + rateText;
+        String color = rate < 0 ? "[scarlet]" : (rate > 0 ? "[lime]" : "[white]");
+        return color + UI.formatAmount(amount) + " [gray](" + formatRate(rate) + "[gray])[]";
     }
 
     private String formatRate(int rate) {
         if (rate == 0) {
-            return "[gray]0/s[]";
+            return "0/s";
         }
-        String color = rate > 0 ? "[lime]+" : "[scarlet]";
-        return color + rate + "/s[]";
+        String prefix = rate > 0 ? "[lime]+" : "[scarlet]";
+        return prefix + rate + "[gray]/s[]";
     }
 }
