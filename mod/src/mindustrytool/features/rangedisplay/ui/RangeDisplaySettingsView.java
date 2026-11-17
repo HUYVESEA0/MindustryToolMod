@@ -3,6 +3,8 @@ package mindustrytool.features.rangedisplay.ui;
 import static solim.UI.*;
 
 import arc.Core;
+import arc.func.Cons;
+import arc.func.Func;
 import arc.graphics.Color;
 import arc.graphics.g2d.TextureRegion;
 import arc.scene.Element;
@@ -12,10 +14,12 @@ import arc.struct.ObjectSet;
 import arc.struct.Seq;
 import java.util.Locale;
 import mindustry.Vars;
+import mindustry.ctype.UnlockableContent;
 import mindustry.gen.Groups;
 import mindustry.gen.Icon;
 import mindustry.gen.Tex;
 import mindustry.graphics.Pal;
+import mindustry.type.UnitType;
 import mindustry.world.Block;
 import mindustrytool.components.SettingCard;
 import mindustrytool.components.SettingKeybindCard;
@@ -28,9 +32,12 @@ import solim.reactive.Signal;
 
 public class RangeDisplaySettingsView extends Component {
 
+    private static final Color DISABLED_CHIP_COLOR = new Color(1f, 1f, 1f, 0.35f);
+
     private final RangeDisplayFeature feature;
     private final Signal<Boolean> turretActiveOnMapOnly = Signal.of(false);
     private final Signal<Boolean> supportActiveOnMapOnly = Signal.of(false);
+    private final Signal<Boolean> unitActiveOnMapOnly = Signal.of(false);
 
     public RangeDisplaySettingsView(RangeDisplayFeature feature) {
         this.feature = feature;
@@ -45,6 +52,7 @@ public class RangeDisplaySettingsView extends Component {
             rangeTypesCard();
             turretsFilterCard();
             supportBlocksFilterCard();
+            unitsFilterCard();
             keybindsCard();
             actionsCard();
         });
@@ -101,6 +109,31 @@ public class RangeDisplaySettingsView extends Component {
 
                     checkbox(Core.bundle.get("feature.range-display.settings.dashed"),
                             feature.dashedConfig.signal()).props(growX());
+
+                    divider().props(color(WebStyles.Colors.SECTION_BORDER));
+
+                    checkbox(Core.bundle.get("feature.range-display.settings.merged-contour"),
+                            feature.mergedContourConfig.signal()).props(growX());
+
+                    checkbox(Core.bundle.get("feature.range-display.settings.pulse-wave"),
+                            feature.pulseWaveConfig.signal()).props(growX());
+
+                    SettingSlider.of(
+                            Core.bundle.get("feature.range-display.settings.fill-alpha"),
+                            feature.fillAlphaConfig.signal(),
+                            0.02f,
+                            0.30f,
+                            0.01f,
+                            feature.fillAlphaConfig.signal()
+                                    .map(v -> Math.round((v != null ? v : 0.10f) * 100) + "%"));
+
+                    divider().props(color(WebStyles.Colors.SECTION_BORDER));
+
+                    checkbox(Core.bundle.get("feature.range-display.settings.draw-attack-cone"),
+                            feature.drawAttackConeConfig.signal()).props(growX());
+
+                    checkbox(Core.bundle.get("feature.range-display.settings.attack-cone-always"),
+                            feature.attackConeAlwaysConfig.signal()).props(growX());
                 });
     }
 
@@ -152,6 +185,15 @@ public class RangeDisplaySettingsView extends Component {
                     checkbox(Core.bundle.get("feature.range-display.settings.draw-enemy-units"),
                             feature.drawUnitRangeEnemyConfig.signal()).props(growX());
 
+                    checkbox(Core.bundle.get("feature.range-display.settings.draw-unit-ability-range"),
+                            feature.drawUnitAbilityRangeConfig.signal()).props(growX());
+
+                    checkbox(Core.bundle.get("feature.range-display.settings.draw-unit-build-range"),
+                            feature.drawUnitBuildRangeConfig.signal()).props(growX());
+
+                    checkbox(Core.bundle.get("feature.range-display.settings.draw-unit-mine-range"),
+                            feature.drawUnitMineRangeConfig.signal()).props(growX());
+
                     divider().props(color(WebStyles.Colors.SECTION_BORDER));
 
                     checkbox(Core.bundle.get("feature.range-display.settings.draw-ally-blocks"),
@@ -184,19 +226,64 @@ public class RangeDisplaySettingsView extends Component {
     }
 
     private Component turretsFilterCard() {
+        return filterCard(
+                Icon.turret,
+                Core.bundle.get("feature.range-display.settings.section.turrets", "Turrets"),
+                () -> feature.setCategoryEnabled(true, true),
+                () -> feature.setCategoryEnabled(true, false),
+                turretActiveOnMapOnly,
+                activeOnly -> getFilteredBlocks(true, activeOnly),
+                Core.bundle.get("feature.range-display.settings.filter.empty-map", "No blocks on current map"),
+                feature::getBlockSignal,
+                block -> feature.setBlockEnabled(block, !feature.isBlockEnabled(block)));
+    }
+
+    private Component supportBlocksFilterCard() {
+        return filterCard(
+                Icon.defense,
+                Core.bundle.get("feature.range-display.settings.section.support-blocks", "Support Blocks"),
+                () -> feature.setCategoryEnabled(false, true),
+                () -> feature.setCategoryEnabled(false, false),
+                supportActiveOnMapOnly,
+                activeOnly -> getFilteredBlocks(false, activeOnly),
+                Core.bundle.get("feature.range-display.settings.filter.empty-map", "No blocks on current map"),
+                feature::getBlockSignal,
+                block -> feature.setBlockEnabled(block, !feature.isBlockEnabled(block)));
+    }
+
+    private Component unitsFilterCard() {
+        return filterCard(
+                Icon.units,
+                Core.bundle.get("feature.range-display.settings.section.units", "Units"),
+                () -> feature.setAllUnitsEnabled(true),
+                () -> feature.setAllUnitsEnabled(false),
+                unitActiveOnMapOnly,
+                this::getFilteredUnits,
+                Core.bundle.get("feature.range-display.settings.filter.empty-units", "No units on current map"),
+                feature::getUnitSignal,
+                unitType -> feature.setUnitEnabled(unitType, !feature.isUnitEnabled(unitType)));
+    }
+
+    private <T extends UnlockableContent> Component filterCard(
+            Drawable headerIcon,
+            String title,
+            Runnable onSelectAll,
+            Runnable onSelectNone,
+            Signal<Boolean> activeOnMapOnly,
+            Func<Boolean, Seq<T>> itemSupplier,
+            String emptyMessage,
+            Func<T, Signal<Boolean>> signalSupplier,
+            Cons<T> onToggle) {
         return SettingCard.card().children(() -> {
             row().props(growX(), gap(unit(2)), center()).children(() -> {
-                icon(Icon.turret).props(size(unit(5)), prefWidth(unit(5)), prefHeight(unit(5)), color(Pal.accent));
-                text(Core.bundle.get("feature.range-display.settings.section.turrets", "Turrets"))
-                        .props(color(Pal.accent), growX(), left());
+                icon(headerIcon).props(size(unit(5)), prefWidth(unit(5)), prefHeight(unit(5)), color(Pal.accent));
+                text(title).props(color(Pal.accent), growX(), left());
 
                 row().props(gap(unit(1))).children(() -> {
-                    button(Core.bundle.get("feature.range-display.settings.all", "All"),
-                            () -> feature.setCategoryEnabled(true, true))
+                    button(Core.bundle.get("feature.range-display.settings.all", "All"), onSelectAll)
                             .props(style(WebStyles.outlineText()), height(unit(8)), prefHeight(unit(8)), padding(unit(1), unit(2.5f), unit(1), unit(2.5f)));
 
-                    button(Core.bundle.get("feature.range-display.settings.none", "None"),
-                            () -> feature.setCategoryEnabled(true, false))
+                    button(Core.bundle.get("feature.range-display.settings.none", "None"), onSelectNone)
                             .props(style(WebStyles.ghostText()), height(unit(8)), prefHeight(unit(8)), padding(unit(1), unit(2.5f), unit(1), unit(2.5f)));
                 });
             });
@@ -204,24 +291,24 @@ public class RangeDisplaySettingsView extends Component {
             if (Vars.state != null && Vars.state.isGame()) {
                 row().props(growX(), gap(unit(1.5f)), left()).children(() -> {
                     button(Core.bundle.get("feature.range-display.settings.filter.all", "All"),
-                            () -> turretActiveOnMapOnly.set(false))
-                            .props(style(WebStyles.filterChipText()), checked(turretActiveOnMapOnly.map(active -> !Boolean.TRUE.equals(active))));
+                            () -> activeOnMapOnly.set(false))
+                            .props(style(WebStyles.filterChipText()), checked(activeOnMapOnly.map(active -> !Boolean.TRUE.equals(active))));
 
                     button(Core.bundle.get("feature.range-display.settings.filter.active-on-map", "Active on Map"),
-                            () -> turretActiveOnMapOnly.set(true))
-                            .props(style(WebStyles.filterChipText()), checked(turretActiveOnMapOnly.map(active -> Boolean.TRUE.equals(active))));
+                            () -> activeOnMapOnly.set(true))
+                            .props(style(WebStyles.filterChipText()), checked(activeOnMapOnly.map(active -> Boolean.TRUE.equals(active))));
                 });
             }
 
-            dynamic(turretActiveOnMapOnly, activeOnly -> {
-                Seq<Block> blocks = getFilteredBlocks(true, Boolean.TRUE.equals(activeOnly));
-                if (blocks.isEmpty()) {
-                    text(Core.bundle.get("feature.range-display.settings.filter.empty-map", "No blocks on current map"))
+            dynamic(activeOnMapOnly, activeOnly -> {
+                Seq<T> items = itemSupplier.get(Boolean.TRUE.equals(activeOnly));
+                if (items.isEmpty()) {
+                    text(emptyMessage)
                             .props(color(WebStyles.Colors.GHOST_FG), margin(unit(2)));
                 } else {
                     wrap().props(growX(), left(), gap(unit(1.5f))).children(() -> {
-                        for (Block block : blocks) {
-                            blockChip(block);
+                        for (T item : items) {
+                            contentChip(item, signalSupplier.get(item), () -> onToggle.get(item));
                         }
                     });
                 }
@@ -229,50 +316,35 @@ public class RangeDisplaySettingsView extends Component {
         });
     }
 
-    private Component supportBlocksFilterCard() {
-        return SettingCard.card().children(() -> {
-            row().props(growX(), gap(unit(2)), center()).children(() -> {
-                icon(Icon.defense).props(size(unit(5)), prefWidth(unit(5)), prefHeight(unit(5)), color(Pal.accent));
-                text(Core.bundle.get("feature.range-display.settings.section.support-blocks", "Support Blocks"))
-                        .props(color(Pal.accent), growX(), left());
+    private Seq<UnitType> getFilteredUnits(boolean activeOnly) {
+        Seq<UnitType> result = new Seq<>();
+        if (Vars.content == null || Vars.content.units() == null) {
+            return result;
+        }
 
-                row().props(gap(unit(1))).children(() -> {
-                    button(Core.bundle.get("feature.range-display.settings.all", "All"),
-                            () -> feature.setCategoryEnabled(false, true))
-                            .props(style(WebStyles.outlineText()), height(unit(8)), prefHeight(unit(8)), padding(unit(1), unit(2.5f), unit(1), unit(2.5f)));
-
-                    button(Core.bundle.get("feature.range-display.settings.none", "None"),
-                            () -> feature.setCategoryEnabled(false, false))
-                            .props(style(WebStyles.ghostText()), height(unit(8)), prefHeight(unit(8)), padding(unit(1), unit(2.5f), unit(1), unit(2.5f)));
-                });
-            });
-
-            if (Vars.state != null && Vars.state.isGame()) {
-                row().props(growX(), gap(unit(1.5f)), left()).children(() -> {
-                    button(Core.bundle.get("feature.range-display.settings.filter.all", "All"),
-                            () -> supportActiveOnMapOnly.set(false))
-                            .props(style(WebStyles.filterChipText()), checked(supportActiveOnMapOnly.map(active -> !Boolean.TRUE.equals(active))));
-
-                    button(Core.bundle.get("feature.range-display.settings.filter.active-on-map", "Active on Map"),
-                            () -> supportActiveOnMapOnly.set(true))
-                            .props(style(WebStyles.filterChipText()), checked(supportActiveOnMapOnly.map(active -> Boolean.TRUE.equals(active))));
+        if (activeOnly) {
+            ObjectSet<UnitType> activeUnits = new ObjectSet<>();
+            if (Vars.state != null && Vars.state.isGame() && Groups.unit != null) {
+                Groups.unit.each(u -> {
+                    if (u != null && u.type != null) {
+                        activeUnits.add(u.type);
+                    }
                 });
             }
-
-            dynamic(supportActiveOnMapOnly, activeOnly -> {
-                Seq<Block> blocks = getFilteredBlocks(false, Boolean.TRUE.equals(activeOnly));
-                if (blocks.isEmpty()) {
-                    text(Core.bundle.get("feature.range-display.settings.filter.empty-map", "No blocks on current map"))
-                            .props(color(WebStyles.Colors.GHOST_FG), margin(unit(2)));
-                } else {
-                    wrap().props(growX(), left(), gap(unit(1.5f))).children(() -> {
-                        for (Block block : blocks) {
-                            blockChip(block);
-                        }
-                    });
+            for (UnitType unitType : Vars.content.units()) {
+                if (feature.isRangeUnit(unitType) && activeUnits.contains(unitType)) {
+                    result.add(unitType);
                 }
-            }).props(growX());
-        });
+            }
+            return result;
+        }
+
+        for (UnitType unitType : Vars.content.units()) {
+            if (feature.isRangeUnit(unitType)) {
+                result.add(unitType);
+            }
+        }
+        return result;
     }
 
     private Seq<Block> getFilteredBlocks(boolean isTurret, boolean activeOnly) {
@@ -320,18 +392,17 @@ public class RangeDisplaySettingsView extends Component {
         });
     }
 
-    private void blockChip(Block block) {
-        Signal<Boolean> signal = feature.getBlockSignal(block);
-        TextureRegion region = block.uiIcon != null ? block.uiIcon : block.fullIcon;
+    private void contentChip(UnlockableContent content, Signal<Boolean> signal, Runnable onToggle) {
+        TextureRegion region = content.uiIcon != null ? content.uiIcon : content.fullIcon;
         Drawable drawable = region != null ? new TextureRegionDrawable(region) : Tex.clear;
 
         button()
-                .props(style(WebStyles.filterChip()), size(unit(11)), prefWidth(unit(11)), prefHeight(unit(11)), padding(unit(1)), tooltip(block.localizedName), checked(signal))
-                .onClick(() -> feature.setBlockEnabled(block, !feature.isBlockEnabled(block)))
+                .props(style(WebStyles.filterChip()), size(unit(11)), prefWidth(unit(11)), prefHeight(unit(11)), padding(unit(1)), tooltip(content.localizedName), checked(signal))
+                .onClick(onToggle)
                 .children(() -> {
                     icon(drawable)
                             .props(size(unit(6)), prefWidth(unit(6)), prefHeight(unit(6)), color(signal.map(enabled -> Boolean.TRUE.equals(enabled) ? Color.white
-                                    : new Color(1f, 1f, 1f, 0.35f))));
+                                    : DISABLED_CHIP_COLOR)));
                 });
     }
 }

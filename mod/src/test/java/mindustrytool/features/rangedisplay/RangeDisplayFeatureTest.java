@@ -4,18 +4,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.lang.reflect.Field;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import arc.Core;
-import arc.math.geom.Rect;
-import arc.struct.Seq;
 import solim.reactive.Effect;
 import mindustry.Vars;
+import mindustry.content.UnitTypes;
 import mindustry.core.ContentLoader;
-import mindustry.game.Rules;
-import mindustry.world.Tile;
+import mindustry.type.UnitType;
 import mindustry.world.blocks.defense.BuildTurret;
 import mindustry.world.blocks.defense.ForceProjector;
 import mindustry.world.blocks.defense.MendProjector;
@@ -54,6 +51,9 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         feature.drawUnitRangePlayerConfig.set(false);
         feature.drawUnitRangeAllyConfig.set(false);
         feature.drawUnitRangeEnemyConfig.set(false);
+        feature.drawUnitAbilityRangeConfig.set(false);
+        feature.drawUnitBuildRangeConfig.set(true);
+        feature.drawUnitMineRangeConfig.set(true);
         feature.drawBlockRangeAllyConfig.set(false);
         feature.drawBlockRangeEnemyConfig.set(false);
         feature.drawSpawnerRangeConfig.set(false);
@@ -63,6 +63,11 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         feature.useTeamColorForSpecialConfig.set(true);
         feature.dashedConfig.set(false);
         feature.zoomThresholdConfig.set(1.5f);
+        feature.mergedContourConfig.set(false);
+        feature.pulseWaveConfig.set(false);
+        feature.fillAlphaConfig.set(0.22f);
+        feature.drawAttackConeConfig.set(false);
+        feature.attackConeAlwaysConfig.set(true);
 
         assertEquals(0.35f, feature.opacityConfig.get(), 0.001f);
         assertEquals(2.5f, feature.strokeWidthConfig.get(), 0.001f);
@@ -77,6 +82,9 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         assertFalse(feature.drawUnitRangePlayerConfig.get());
         assertFalse(feature.drawUnitRangeAllyConfig.get());
         assertFalse(feature.drawUnitRangeEnemyConfig.get());
+        assertFalse(feature.drawUnitAbilityRangeConfig.get());
+        assertTrue(feature.drawUnitBuildRangeConfig.get());
+        assertTrue(feature.drawUnitMineRangeConfig.get());
         assertFalse(feature.drawBlockRangeAllyConfig.get());
         assertFalse(feature.drawBlockRangeEnemyConfig.get());
         assertFalse(feature.drawSpawnerRangeConfig.get());
@@ -86,6 +94,11 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         assertTrue(feature.useTeamColorForSpecialConfig.get());
         assertFalse(feature.dashedConfig.get());
         assertEquals(1.5f, feature.zoomThresholdConfig.get(), 0.001f);
+        assertFalse(feature.mergedContourConfig.get());
+        assertFalse(feature.pulseWaveConfig.get());
+        assertEquals(0.22f, feature.fillAlphaConfig.get(), 0.001f);
+        assertFalse(feature.drawAttackConeConfig.get());
+        assertTrue(feature.attackConeAlwaysConfig.get());
 
         feature.resetToDefaults();
 
@@ -102,6 +115,9 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         assertTrue(feature.drawUnitRangePlayerConfig.get());
         assertTrue(feature.drawUnitRangeAllyConfig.get());
         assertTrue(feature.drawUnitRangeEnemyConfig.get());
+        assertTrue(feature.drawUnitAbilityRangeConfig.get());
+        assertFalse(feature.drawUnitBuildRangeConfig.get());
+        assertFalse(feature.drawUnitMineRangeConfig.get());
         assertTrue(feature.drawBlockRangeAllyConfig.get());
         assertTrue(feature.drawBlockRangeEnemyConfig.get());
         assertTrue(feature.drawSpawnerRangeConfig.get());
@@ -111,6 +127,11 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         assertFalse(feature.useTeamColorForSpecialConfig.get());
         assertTrue(feature.dashedConfig.get());
         assertEquals(0.5f, feature.zoomThresholdConfig.get(), 0.001f);
+        assertTrue(feature.mergedContourConfig.get());
+        assertTrue(feature.pulseWaveConfig.get());
+        assertEquals(0.10f, feature.fillAlphaConfig.get(), 0.001f);
+        assertTrue(feature.drawAttackConeConfig.get());
+        assertFalse(feature.attackConeAlwaysConfig.get());
     }
 
     @Test
@@ -264,31 +285,39 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
     }
 
     @Test
-    void testAllPrimitiveCachesSynchronizeOnSignalAndConfigChanges() throws Exception {
+    void testAllPrimitiveCachesSynchronizeOnSignalAndConfigChanges() {
         RangeDisplayFeature feature = new RangeDisplayFeature();
 
-        assertEquals(1.0f, getCachedFloat(feature, "cachedOpacity"), 0.001f);
-        assertEquals(1.0f, getCachedFloat(feature, "cachedStrokeWidth"), 0.001f);
-        assertFalse(getCachedBool(feature, "cachedHoverOnly"));
-        assertTrue(getCachedBool(feature, "cachedFilterTargetAir"));
-        assertTrue(getCachedBool(feature, "cachedFilterTargetGround"));
-        assertFalse(getCachedBool(feature, "cachedOnlyWithAmmo"));
-        assertFalse(getCachedBool(feature, "cachedProximityFilter"));
-        assertEquals(30.0f, getCachedFloat(feature, "cachedProximityRadius"), 0.001f);
-        assertTrue(getCachedBool(feature, "cachedDrawTurretRangeAlly"));
-        assertTrue(getCachedBool(feature, "cachedDrawTurretRangeEnemy"));
-        assertTrue(getCachedBool(feature, "cachedDrawUnitRangePlayer"));
-        assertTrue(getCachedBool(feature, "cachedDrawUnitRangeAlly"));
-        assertTrue(getCachedBool(feature, "cachedDrawUnitRangeEnemy"));
-        assertTrue(getCachedBool(feature, "cachedDrawBlockRangeAlly"));
-        assertTrue(getCachedBool(feature, "cachedDrawBlockRangeEnemy"));
-        assertTrue(getCachedBool(feature, "cachedDrawSpawnerRange"));
-        assertTrue(getCachedBool(feature, "cachedDrawOverdriveRange"));
-        assertTrue(getCachedBool(feature, "cachedDrawMenderRange"));
-        assertTrue(getCachedBool(feature, "cachedDrawPointDefenseRange"));
-        assertFalse(getCachedBool(feature, "cachedUseTeamColorForSpecial"));
-        assertTrue(getCachedBool(feature, "cachedDashed"));
-        assertEquals(0.5f, getCachedFloat(feature, "cachedZoomThreshold"), 0.001f);
+        assertEquals(1.0f, feature.cachedOpacity, 0.001f);
+        assertEquals(1.0f, feature.cachedStrokeWidth, 0.001f);
+        assertFalse(feature.cachedHoverOnly);
+        assertTrue(feature.cachedFilterTargetAir);
+        assertTrue(feature.cachedFilterTargetGround);
+        assertFalse(feature.cachedOnlyWithAmmo);
+        assertFalse(feature.cachedProximityFilter);
+        assertEquals(30.0f, feature.cachedProximityRadius, 0.001f);
+        assertTrue(feature.cachedDrawTurretRangeAlly);
+        assertTrue(feature.cachedDrawTurretRangeEnemy);
+        assertTrue(feature.cachedDrawUnitRangePlayer);
+        assertTrue(feature.cachedDrawUnitRangeAlly);
+        assertTrue(feature.cachedDrawUnitRangeEnemy);
+        assertTrue(feature.cachedDrawUnitAbilityRange);
+        assertFalse(feature.cachedDrawUnitBuildRange);
+        assertFalse(feature.cachedDrawUnitMineRange);
+        assertTrue(feature.cachedDrawBlockRangeAlly);
+        assertTrue(feature.cachedDrawBlockRangeEnemy);
+        assertTrue(feature.cachedDrawSpawnerRange);
+        assertTrue(feature.cachedDrawOverdriveRange);
+        assertTrue(feature.cachedDrawMenderRange);
+        assertTrue(feature.cachedDrawPointDefenseRange);
+        assertFalse(feature.cachedUseTeamColorForSpecial);
+        assertTrue(feature.cachedDashed);
+        assertEquals(0.5f, feature.cachedZoomThreshold, 0.001f);
+        assertTrue(feature.cachedMergedContour);
+        assertTrue(feature.cachedPulseWave);
+        assertEquals(0.10f, feature.cachedFillAlpha, 0.001f);
+        assertTrue(feature.cachedDrawAttackCone);
+        assertFalse(feature.cachedAttackConeAlways);
 
         feature.opacityConfig.set(0.42f);
         feature.strokeWidthConfig.set(2.8f);
@@ -303,6 +332,9 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         feature.drawUnitRangePlayerConfig.set(false);
         feature.drawUnitRangeAllyConfig.set(false);
         feature.drawUnitRangeEnemyConfig.set(false);
+        feature.drawUnitAbilityRangeConfig.set(false);
+        feature.drawUnitBuildRangeConfig.set(true);
+        feature.drawUnitMineRangeConfig.set(true);
         feature.drawBlockRangeAllyConfig.set(false);
         feature.drawBlockRangeEnemyConfig.set(false);
         feature.drawSpawnerRangeConfig.set(false);
@@ -312,30 +344,43 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         feature.useTeamColorForSpecialConfig.set(true);
         feature.dashedConfig.set(false);
         feature.zoomThresholdConfig.set(1.5f);
+        feature.mergedContourConfig.set(false);
+        feature.pulseWaveConfig.set(false);
+        feature.fillAlphaConfig.set(0.25f);
+        feature.drawAttackConeConfig.set(false);
+        feature.attackConeAlwaysConfig.set(true);
         flushEffects();
 
-        assertEquals(0.42f, getCachedFloat(feature, "cachedOpacity"), 0.001f);
-        assertEquals(2.8f, getCachedFloat(feature, "cachedStrokeWidth"), 0.001f);
-        assertTrue(getCachedBool(feature, "cachedHoverOnly"));
-        assertFalse(getCachedBool(feature, "cachedFilterTargetAir"));
-        assertFalse(getCachedBool(feature, "cachedFilterTargetGround"));
-        assertTrue(getCachedBool(feature, "cachedOnlyWithAmmo"));
-        assertTrue(getCachedBool(feature, "cachedProximityFilter"));
-        assertEquals(55.0f, getCachedFloat(feature, "cachedProximityRadius"), 0.001f);
-        assertFalse(getCachedBool(feature, "cachedDrawTurretRangeAlly"));
-        assertFalse(getCachedBool(feature, "cachedDrawTurretRangeEnemy"));
-        assertFalse(getCachedBool(feature, "cachedDrawUnitRangePlayer"));
-        assertFalse(getCachedBool(feature, "cachedDrawUnitRangeAlly"));
-        assertFalse(getCachedBool(feature, "cachedDrawUnitRangeEnemy"));
-        assertFalse(getCachedBool(feature, "cachedDrawBlockRangeAlly"));
-        assertFalse(getCachedBool(feature, "cachedDrawBlockRangeEnemy"));
-        assertFalse(getCachedBool(feature, "cachedDrawSpawnerRange"));
-        assertFalse(getCachedBool(feature, "cachedDrawOverdriveRange"));
-        assertFalse(getCachedBool(feature, "cachedDrawMenderRange"));
-        assertFalse(getCachedBool(feature, "cachedDrawPointDefenseRange"));
-        assertTrue(getCachedBool(feature, "cachedUseTeamColorForSpecial"));
-        assertFalse(getCachedBool(feature, "cachedDashed"));
-        assertEquals(1.5f, getCachedFloat(feature, "cachedZoomThreshold"), 0.001f);
+        assertEquals(0.42f, feature.cachedOpacity, 0.001f);
+        assertEquals(2.8f, feature.cachedStrokeWidth, 0.001f);
+        assertTrue(feature.cachedHoverOnly);
+        assertFalse(feature.cachedFilterTargetAir);
+        assertFalse(feature.cachedFilterTargetGround);
+        assertTrue(feature.cachedOnlyWithAmmo);
+        assertTrue(feature.cachedProximityFilter);
+        assertEquals(55.0f, feature.cachedProximityRadius, 0.001f);
+        assertFalse(feature.cachedDrawTurretRangeAlly);
+        assertFalse(feature.cachedDrawTurretRangeEnemy);
+        assertFalse(feature.cachedDrawUnitRangePlayer);
+        assertFalse(feature.cachedDrawUnitRangeAlly);
+        assertFalse(feature.cachedDrawUnitRangeEnemy);
+        assertFalse(feature.cachedDrawUnitAbilityRange);
+        assertTrue(feature.cachedDrawUnitBuildRange);
+        assertTrue(feature.cachedDrawUnitMineRange);
+        assertFalse(feature.cachedDrawBlockRangeAlly);
+        assertFalse(feature.cachedDrawBlockRangeEnemy);
+        assertFalse(feature.cachedDrawSpawnerRange);
+        assertFalse(feature.cachedDrawOverdriveRange);
+        assertFalse(feature.cachedDrawMenderRange);
+        assertFalse(feature.cachedDrawPointDefenseRange);
+        assertTrue(feature.cachedUseTeamColorForSpecial);
+        assertFalse(feature.cachedDashed);
+        assertEquals(1.5f, feature.cachedZoomThreshold, 0.001f);
+        assertFalse(feature.cachedMergedContour);
+        assertFalse(feature.cachedPulseWave);
+        assertEquals(0.25f, feature.cachedFillAlpha, 0.001f);
+        assertFalse(feature.cachedDrawAttackCone);
+        assertTrue(feature.cachedAttackConeAlways);
 
         feature.opacityConfig.signal().set(0.88f);
         feature.strokeWidthConfig.signal().set(3.5f);
@@ -350,6 +395,9 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         feature.drawUnitRangePlayerConfig.signal().set(true);
         feature.drawUnitRangeAllyConfig.signal().set(true);
         feature.drawUnitRangeEnemyConfig.signal().set(true);
+        feature.drawUnitAbilityRangeConfig.signal().set(true);
+        feature.drawUnitBuildRangeConfig.signal().set(false);
+        feature.drawUnitMineRangeConfig.signal().set(false);
         feature.drawBlockRangeAllyConfig.signal().set(true);
         feature.drawBlockRangeEnemyConfig.signal().set(true);
         feature.drawSpawnerRangeConfig.signal().set(true);
@@ -359,118 +407,138 @@ class RangeDisplayFeatureTest extends MindustryTestEnv {
         feature.useTeamColorForSpecialConfig.signal().set(false);
         feature.dashedConfig.signal().set(true);
         feature.zoomThresholdConfig.signal().set(2.5f);
+        feature.mergedContourConfig.signal().set(true);
+        feature.pulseWaveConfig.signal().set(true);
+        feature.fillAlphaConfig.signal().set(0.15f);
+        feature.drawAttackConeConfig.signal().set(true);
+        feature.attackConeAlwaysConfig.signal().set(false);
         flushEffects();
 
-        assertEquals(0.88f, getCachedFloat(feature, "cachedOpacity"), 0.001f);
-        assertEquals(3.5f, getCachedFloat(feature, "cachedStrokeWidth"), 0.001f);
-        assertFalse(getCachedBool(feature, "cachedHoverOnly"));
-        assertTrue(getCachedBool(feature, "cachedFilterTargetAir"));
-        assertTrue(getCachedBool(feature, "cachedFilterTargetGround"));
-        assertFalse(getCachedBool(feature, "cachedOnlyWithAmmo"));
-        assertFalse(getCachedBool(feature, "cachedProximityFilter"));
-        assertEquals(12.0f, getCachedFloat(feature, "cachedProximityRadius"), 0.001f);
-        assertTrue(getCachedBool(feature, "cachedDrawTurretRangeAlly"));
-        assertTrue(getCachedBool(feature, "cachedDrawTurretRangeEnemy"));
-        assertTrue(getCachedBool(feature, "cachedDrawUnitRangePlayer"));
-        assertTrue(getCachedBool(feature, "cachedDrawUnitRangeAlly"));
-        assertTrue(getCachedBool(feature, "cachedDrawUnitRangeEnemy"));
-        assertTrue(getCachedBool(feature, "cachedDrawBlockRangeAlly"));
-        assertTrue(getCachedBool(feature, "cachedDrawBlockRangeEnemy"));
-        assertTrue(getCachedBool(feature, "cachedDrawSpawnerRange"));
-        assertTrue(getCachedBool(feature, "cachedDrawOverdriveRange"));
-        assertTrue(getCachedBool(feature, "cachedDrawMenderRange"));
-        assertTrue(getCachedBool(feature, "cachedDrawPointDefenseRange"));
-        assertFalse(getCachedBool(feature, "cachedUseTeamColorForSpecial"));
-        assertTrue(getCachedBool(feature, "cachedDashed"));
-        assertEquals(2.5f, getCachedFloat(feature, "cachedZoomThreshold"), 0.001f);
+        assertEquals(0.88f, feature.cachedOpacity, 0.001f);
+        assertEquals(3.5f, feature.cachedStrokeWidth, 0.001f);
+        assertFalse(feature.cachedHoverOnly);
+        assertTrue(feature.cachedFilterTargetAir);
+        assertTrue(feature.cachedFilterTargetGround);
+        assertFalse(feature.cachedOnlyWithAmmo);
+        assertFalse(feature.cachedProximityFilter);
+        assertEquals(12.0f, feature.cachedProximityRadius, 0.001f);
+        assertTrue(feature.cachedDrawTurretRangeAlly);
+        assertTrue(feature.cachedDrawTurretRangeEnemy);
+        assertTrue(feature.cachedDrawUnitRangePlayer);
+        assertTrue(feature.cachedDrawUnitRangeAlly);
+        assertTrue(feature.cachedDrawUnitRangeEnemy);
+        assertTrue(feature.cachedDrawUnitAbilityRange);
+        assertFalse(feature.cachedDrawUnitBuildRange);
+        assertFalse(feature.cachedDrawUnitMineRange);
+        assertTrue(feature.cachedDrawBlockRangeAlly);
+        assertTrue(feature.cachedDrawBlockRangeEnemy);
+        assertTrue(feature.cachedDrawSpawnerRange);
+        assertTrue(feature.cachedDrawOverdriveRange);
+        assertTrue(feature.cachedDrawMenderRange);
+        assertTrue(feature.cachedDrawPointDefenseRange);
+        assertFalse(feature.cachedUseTeamColorForSpecial);
+        assertTrue(feature.cachedDashed);
+        assertEquals(2.5f, feature.cachedZoomThreshold, 0.001f);
+        assertTrue(feature.cachedMergedContour);
+        assertTrue(feature.cachedPulseWave);
+        assertEquals(0.15f, feature.cachedFillAlpha, 0.001f);
+        assertTrue(feature.cachedDrawAttackCone);
+        assertFalse(feature.cachedAttackConeAlways);
 
         feature.opacityConfig.signal().set(null);
         feature.hoverOnlyConfig.signal().set(null);
         feature.filterTargetAirConfig.signal().set(null);
         feature.useTeamColorForSpecialConfig.signal().set(null);
         feature.zoomThresholdConfig.signal().set(null);
+        feature.mergedContourConfig.signal().set(null);
+        feature.pulseWaveConfig.signal().set(null);
+        feature.fillAlphaConfig.signal().set(null);
+        feature.drawAttackConeConfig.signal().set(null);
+        feature.attackConeAlwaysConfig.signal().set(null);
+        feature.drawUnitAbilityRangeConfig.signal().set(null);
+        feature.drawUnitBuildRangeConfig.signal().set(null);
+        feature.drawUnitMineRangeConfig.signal().set(null);
         flushEffects();
-        assertEquals(1.0f, getCachedFloat(feature, "cachedOpacity"), 0.001f);
-        assertFalse(getCachedBool(feature, "cachedHoverOnly"));
-        assertTrue(getCachedBool(feature, "cachedFilterTargetAir"));
-        assertFalse(getCachedBool(feature, "cachedUseTeamColorForSpecial"));
-        assertEquals(0.5f, getCachedFloat(feature, "cachedZoomThreshold"), 0.001f);
+        assertEquals(1.0f, feature.cachedOpacity, 0.001f);
+        assertFalse(feature.cachedHoverOnly);
+        assertTrue(feature.cachedFilterTargetAir);
+        assertFalse(feature.cachedUseTeamColorForSpecial);
+        assertEquals(0.5f, feature.cachedZoomThreshold, 0.001f);
+        assertTrue(feature.cachedMergedContour);
+        assertTrue(feature.cachedPulseWave);
+        assertEquals(0.10f, feature.cachedFillAlpha, 0.001f);
+        assertTrue(feature.cachedDrawAttackCone);
+        assertFalse(feature.cachedAttackConeAlways);
+        assertTrue(feature.cachedDrawUnitAbilityRange);
+        assertFalse(feature.cachedDrawUnitBuildRange);
+        assertFalse(feature.cachedDrawUnitMineRange);
 
         feature.opacityConfig.set(0.1f);
         feature.zoomThresholdConfig.set(3.0f);
+        feature.drawUnitBuildRangeConfig.set(true);
         flushEffects();
         feature.resetToDefaults();
         flushEffects();
-        assertEquals(1.0f, getCachedFloat(feature, "cachedOpacity"), 0.001f);
-        assertEquals(1.0f, getCachedFloat(feature, "cachedStrokeWidth"), 0.001f);
-        assertFalse(getCachedBool(feature, "cachedHoverOnly"));
-        assertEquals(0.5f, getCachedFloat(feature, "cachedZoomThreshold"), 0.001f);
+        assertEquals(1.0f, feature.cachedOpacity, 0.001f);
+        assertEquals(1.0f, feature.cachedStrokeWidth, 0.001f);
+        assertFalse(feature.cachedHoverOnly);
+        assertEquals(0.5f, feature.cachedZoomThreshold, 0.001f);
+        assertFalse(feature.cachedDrawUnitBuildRange);
     }
 
     @Test
-    void testSpawnerDropZonesHandlingEmptyAndNullSpawns() {
+    void testUnitClassificationAndPerUnitToggles() {
+        RangeDisplayFeature feature = new RangeDisplayFeature();
+        UnitType dagger = new UnitType("test-dagger");
+        UnitType poly = new UnitType("test-poly");
+        UnitType hidden = new UnitType("test-hidden-unit");
+        hidden.hidden = true;
+        UnitType internal = new UnitType("test-internal-unit");
+        internal.internal = true;
 
-        Rules rules = new Rules();
-        rules.dropZoneRadius = 160f;
-        rules.waveTeam = null;
+        UnitType prevBlock = UnitTypes.block;
+        UnitType blockUnit = new UnitType("test-block-unit");
+        UnitTypes.block = blockUnit;
+        try {
+            assertTrue(feature.isRangeUnit(dagger));
+            assertTrue(feature.isRangeUnit(poly));
+            assertFalse(feature.isRangeUnit(hidden));
+            assertFalse(feature.isRangeUnit(internal));
+            assertFalse(feature.isRangeUnit(blockUnit));
+            assertFalse(feature.isRangeUnit(null));
 
-        Object nullSpawner = null;
-        assertFalse(nullSpawner != null, "Null spawner must be rejected by guard");
+            feature.rebuildBitSet();
 
-        Seq<Tile> nullSpawns = null;
-        assertFalse(nullSpawns != null, "Null spawns must be rejected by guard");
+            assertTrue(feature.isUnitEnabled(dagger));
+            assertTrue(feature.getUnitSignal(dagger).peek());
 
-        Seq<Tile> emptySpawns = new Seq<>();
-        int iterations = 0;
-        for (int i = 0; i < emptySpawns.size; i++) {
-            iterations++;
+            feature.setUnitEnabled(dagger, false);
+            flushEffects();
+            assertFalse(feature.isUnitEnabled(dagger));
+            assertFalse(feature.getUnitSignal(dagger).peek());
+            assertFalse(Core.settings.getBool(RangeDisplayFeature.unitSettingKey(dagger)));
+            assertTrue(feature.isUnitEnabled(poly));
+
+            feature.setAllUnitsEnabled(false);
+            flushEffects();
+            assertFalse(feature.isUnitEnabled(dagger));
+            assertFalse(feature.isUnitEnabled(poly));
+
+            feature.setAllUnitsEnabled(true);
+            flushEffects();
+            assertTrue(feature.isUnitEnabled(dagger));
+            assertTrue(feature.isUnitEnabled(poly));
+
+            feature.setUnitEnabled(dagger, false);
+            flushEffects();
+            assertFalse(feature.isUnitEnabled(dagger));
+
+            feature.resetToDefaults();
+            flushEffects();
+            assertTrue(feature.isUnitEnabled(dagger));
+            assertTrue(feature.isUnitEnabled(poly));
+        } finally {
+            UnitTypes.block = prevBlock;
         }
-        assertEquals(0, iterations, "Empty spawns must execute 0 iterations");
-
-        Seq<Tile> nullTiles = Seq.with((Tile) null, (Tile) null, (Tile) null);
-        int validCount = 0;
-        for (int i = 0; i < nullTiles.size; i++) {
-            Tile tile = nullTiles.get(i);
-            if (tile == null) {
-                continue;
-            }
-            validCount++;
-        }
-        assertEquals(0, validCount, "Null tiles must be safely skipped by continue");
-
-        Rect viewBounds = new Rect(0f, 0f, 800f, 600f);
-        float dropRadius = rules.dropZoneRadius;
-
-        float x1 = 400f, y1 = 300f;
-        boolean inView1 = x1 + dropRadius >= viewBounds.x && x1 - dropRadius <= viewBounds.x + viewBounds.width
-                && y1 + dropRadius >= viewBounds.y && y1 - dropRadius <= viewBounds.y + viewBounds.height;
-        assertTrue(inView1, "Center spawn tile must be inside viewBounds");
-
-        float x2 = 2500f, y2 = 2500f;
-        boolean inView2 = x2 + dropRadius >= viewBounds.x && x2 - dropRadius <= viewBounds.x + viewBounds.width
-                && y2 + dropRadius >= viewBounds.y && y2 - dropRadius <= viewBounds.y + viewBounds.height;
-        assertFalse(inView2, "Distant spawn tile must be culled outside viewBounds");
-
-        float x3 = -150f, y3 = 300f;
-        boolean inView3 = x3 + dropRadius >= viewBounds.x && x3 - dropRadius <= viewBounds.x + viewBounds.width
-                && y3 + dropRadius >= viewBounds.y && y3 - dropRadius <= viewBounds.y + viewBounds.height;
-        assertTrue(inView3, "Boundary-overlapping spawn tile must not be prematurely culled");
-
-        float x4 = -170f, y4 = 300f;
-        boolean inView4 = x4 + dropRadius >= viewBounds.x && x4 - dropRadius <= viewBounds.x + viewBounds.width
-                && y4 + dropRadius >= viewBounds.y && y4 - dropRadius <= viewBounds.y + viewBounds.height;
-        assertFalse(inView4, "Spawn tile beyond boundary edge must be culled");
-    }
-
-    private static float getCachedFloat(RangeDisplayFeature feature, String fieldName) throws Exception {
-        Field field = RangeDisplayFeature.class.getDeclaredField(fieldName);
-        field.setAccessible(true);
-        return field.getFloat(feature);
-    }
-
-    private static boolean getCachedBool(RangeDisplayFeature feature, String fieldName) throws Exception {
-        Field field = RangeDisplayFeature.class.getDeclaredField(fieldName);
-        field.setAccessible(true);
-        return field.getBoolean(feature);
     }
 }
