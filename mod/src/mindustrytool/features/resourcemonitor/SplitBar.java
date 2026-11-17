@@ -71,6 +71,14 @@ public class SplitBar extends Element {
     @Override
     public void act(float delta) {
         super.act(delta);
+        if (graphs.isEmpty()) {
+            if (smoothFractions.size > 0 || sectionTextCache.size > 0) {
+                smoothFractions.clear();
+                smoothWeights.clear();
+                sectionTextCache.clear();
+            }
+            return;
+        }
         if (smoothFractions.size > graphs.size * 2 && smoothFractions.size > 16) {
             smoothFractions.clear();
             smoothWeights.clear();

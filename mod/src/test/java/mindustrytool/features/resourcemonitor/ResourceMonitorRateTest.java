@@ -171,6 +171,13 @@ class ResourceMonitorRateTest extends MindustryTestEnv {
         assertFalse(state.getUsedItems().contains(lead));
         assertEquals(1, state.usedItemsSignal.get().size);
         assertEquals(copper, state.usedItemsSignal.get().first());
+
+        feature.hideZeroItemsConfig.set(false);
+        state.refreshZeroFilters();
+
+        assertTrue(state.getUsedItems().contains(copper));
+        assertTrue(state.getUsedItems().contains(lead));
+        assertEquals(2, state.usedItemsSignal.get().size);
     }
 
     @Test

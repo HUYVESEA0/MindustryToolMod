@@ -62,6 +62,7 @@ public class ResourceMonitorFeature extends Feature {
     private @Nullable ResourceMonitorHudView hudView;
     private @Nullable ResourceMonitorSettingsDialog settingsDialog;
     private boolean previousCoreItems = true;
+    private boolean coreItemsSuppressed = false;
 
     public ResourceMonitorFeature() {
         super(FeatureMetadata.builder()
@@ -262,7 +263,12 @@ public class ResourceMonitorFeature extends Feature {
                     && Vars.state.isGame());
             MindustryDockRegistry.get().registerHud("resource-monitor", el);
 
-            previousCoreItems = Core.settings.getBool("coreitems", true);
+            if (!coreItemsSuppressed) {
+                previousCoreItems = Core.settings.getBool("mindustrytool.resource-monitor.saved-coreitems",
+                        Core.settings.getBool("coreitems", true));
+                Core.settings.put("mindustrytool.resource-monitor.saved-coreitems", previousCoreItems);
+                coreItemsSuppressed = true;
+            }
             Core.settings.put("coreitems", false);
 
             Core.app.post(() -> {
@@ -282,7 +288,11 @@ public class ResourceMonitorFeature extends Feature {
             view.element().remove();
             view.dispose();
         }
-        Core.settings.put("coreitems", previousCoreItems);
+        if (coreItemsSuppressed) {
+            coreItemsSuppressed = false;
+            Core.settings.put("coreitems", previousCoreItems);
+            Core.settings.remove("mindustrytool.resource-monitor.saved-coreitems");
+        }
     }
 
     @Override

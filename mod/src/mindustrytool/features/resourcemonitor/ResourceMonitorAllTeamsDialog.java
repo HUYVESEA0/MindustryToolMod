@@ -21,7 +21,7 @@ public class ResourceMonitorAllTeamsDialog extends SolimDialog {
 
         children(() -> scroll().props(grow(), scrollX(false)).children(() -> {
             wrap().props(growX(), padding(unit(2.5f)), gap(unit(2)), top(), center()).children(() -> {
-                Seq<Team> valid = state.validTeamsSignal.get();
+                Seq<Team> valid = state.validTeamsSignal.peek();
                 Team[] teams = (valid != null && !valid.isEmpty())
                         ? valid.toArray(Team.class)
                         : Team.baseTeams;
@@ -36,9 +36,9 @@ public class ResourceMonitorAllTeamsDialog extends SolimDialog {
                     }).props(
                             style(WebStyles.filterChip()),
                             checked(selected),
-                            width(150f),
+                            width(unit(38)),
                             height(unit(11)),
-                            prefWidth(150f),
+                            prefWidth(unit(38)),
                             prefHeight(unit(11)),
                             padding(unit(2)),
                             gap(unit(2)))

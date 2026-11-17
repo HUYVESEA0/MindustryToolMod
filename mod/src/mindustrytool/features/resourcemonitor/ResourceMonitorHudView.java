@@ -123,6 +123,13 @@ public class ResourceMonitorHudView extends Table {
         effects.add(Effect.of(feature.opacityConfig.signal(), val -> {
             color.a = val != null ? val : 1f;
         }));
+        effects.add(Effect.of(feature.backgroundOpacityConfig.signal(), val -> {
+            float alpha = val != null ? val : 0.65f;
+            boolean shouldHide = Boolean.TRUE.equals(feature.hideBackgroundConfig.get()) || alpha <= 0.001f;
+            if (shouldHide != (getBackground() == null)) {
+                rebuild();
+            }
+        }));
         effects.add(Effect.of(effectiveScale, s -> rebuild()));
         effects.add(Effect.of(feature.overlayWidthConfig.signal(), w -> rebuild()));
         effects.add(Effect.of(feature.overlayHeightConfig.signal(), h -> rebuild()));
@@ -288,7 +295,9 @@ public class ResourceMonitorHudView extends Table {
         collapseButton = null;
         clearChildren();
 
-        boolean hideBg = Boolean.TRUE.equals(feature.hideBackgroundConfig.get());
+        Float bgOpacityVal = feature.backgroundOpacityConfig.get();
+        float bgAlpha = Mathf.clamp(bgOpacityVal != null ? bgOpacityVal : 0.65f, 0f, 1f);
+        boolean hideBg = Boolean.TRUE.equals(feature.hideBackgroundConfig.get()) || bgAlpha <= 0.001f;
         if (hideBg) {
             setBackground(null);
         } else {
@@ -721,18 +730,11 @@ public class ResourceMonitorHudView extends Table {
                         String rawPowerPrefix = Core.bundle.get("team-resources.power-prefix");
                         final String powerPrefix = rawPowerPrefix.endsWith(" ") ? rawPowerPrefix : rawPowerPrefix + " ";
 
-                        Label powerLabel = new Label("", Styles.outlineLabel);
+                        Label powerLabel = new Label(() -> state.getFormattedPowerLine(powerPrefix));
+                        powerLabel.setStyle(Styles.outlineLabel);
                         powerLabel.setFontScale(0.78f * scale);
                         powerLabel.setEllipsis(true);
-                        final String[] lastBalanceStr = { null };
-                        powerLabel.update(() -> {
-                            String balanceStr = state.getFormattedPowerBalance();
-                            if (!balanceStr.equals(lastBalanceStr[0])) {
-                                lastBalanceStr[0] = balanceStr;
-                                powerLabel.setText(powerPrefix + balanceStr);
-                            }
-                            powerLabel.setColor(state.getPowerBalanceColor());
-                        });
+                        powerLabel.update(() -> powerLabel.setColor(state.getPowerBalanceColor()));
                         power.add(powerLabel).width(finalWidth).left().padBottom(Math.max(2f * scale, rowSpacing)).row();
 
                         power.add(new SplitBar(
@@ -749,17 +751,10 @@ public class ResourceMonitorHudView extends Table {
                             final String storedPrefix = rawStoredPrefix.endsWith(" ") ? rawStoredPrefix
                                     : rawStoredPrefix + " ";
 
-                            Label storedLabel = new Label("", Styles.outlineLabel);
+                            Label storedLabel = new Label(() -> state.getFormattedStoredLine(storedPrefix));
+                            storedLabel.setStyle(Styles.outlineLabel);
                             storedLabel.setFontScale(0.78f * scale);
                             storedLabel.setEllipsis(true);
-                            final String[] lastStoredStr = { null };
-                            storedLabel.update(() -> {
-                                String storedStr = state.getFormattedStoredPower();
-                                if (!storedStr.equals(lastStoredStr[0])) {
-                                    lastStoredStr[0] = storedStr;
-                                    storedLabel.setText(storedPrefix + storedStr);
-                                }
-                            });
                             power.add(storedLabel).width(finalWidth).left()
                                     .padTop(Math.max(3f * scale, rowSpacing * 1.5f))
                                     .padBottom(Math.max(2f * scale, rowSpacing)).row();

@@ -58,6 +58,7 @@ public class ResourceMonitorPreviewView extends Component {
     private final ResourceMonitorFeature feature;
     private boolean initializing = true;
     private @Nullable Table previewStage;
+    private @Nullable Table previewHud;
 
     public ResourceMonitorPreviewView(ResourceMonitorFeature feature) {
         this.feature = feature;
@@ -88,8 +89,12 @@ public class ResourceMonitorPreviewView extends Component {
     }
 
     private void registerEffects() {
-        Effect.of(feature.opacityConfig.signal(), v -> rebuildPreview());
-        Effect.of(feature.backgroundOpacityConfig.signal(), v -> rebuildPreview());
+        Effect.of(feature.opacityConfig.signal(), v -> {
+            Table hud = previewHud;
+            if (hud != null) {
+                hud.color.a = v != null ? v : 1f;
+            }
+        });
         Effect.of(feature.scaleConfig.signal(), v -> rebuildPreview());
         Effect.of(feature.overlayWidthConfig.signal(), v -> rebuildPreview());
         Effect.of(feature.overlayHeightConfig.signal(), v -> rebuildPreview());
@@ -114,6 +119,7 @@ public class ResourceMonitorPreviewView extends Component {
     @Override
     protected void onDispose() {
         previewStage = null;
+        previewHud = null;
     }
 
     private void drawViewportGrid(float x, float y, float w, float h) {
@@ -180,12 +186,12 @@ public class ResourceMonitorPreviewView extends Component {
         boolean hideHeader = Boolean.TRUE.equals(feature.hideHeaderConfig.get());
         Float opacityVal = feature.opacityConfig.get();
         float opacity = opacityVal != null ? opacityVal : 1f;
-        Float bgOpacityVal = feature.backgroundOpacityConfig.get();
-        final float bgOpacity = Mathf.clamp(bgOpacityVal != null ? bgOpacityVal : 0.65f, 0f, 1f);
 
         Table hudMock = new Table() {
             @Override
             protected void drawBackground(float x, float y) {
+                Float bgOpacityVal = feature.backgroundOpacityConfig.get();
+                float bgOpacity = Mathf.clamp(bgOpacityVal != null ? bgOpacityVal : 0.65f, 0f, 1f);
                 if (hideBg || bgOpacity <= 0.001f) {
                     return;
                 }
@@ -204,6 +210,7 @@ public class ResourceMonitorPreviewView extends Component {
         hudMock.setBackground(bg);
         hudMock.color.a = opacity;
         hudMock.margin(6f * scale);
+        this.previewHud = hudMock;
 
         hudMock.table(content -> {
             content.top().left();

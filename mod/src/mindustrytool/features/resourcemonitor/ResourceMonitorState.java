@@ -27,6 +27,8 @@ import solim.reactive.Signal;
 public class ResourceMonitorState {
     private final ObjectSet<Item> usedItems = new ObjectSet<>();
     private final ObjectSet<UnitType> usedUnits = new ObjectSet<>();
+    private final ObjectSet<Item> discoveredItems = new ObjectSet<>();
+    private final ObjectSet<UnitType> discoveredUnits = new ObjectSet<>();
     private final Interval timer = new Interval(2);
 
     private @Nullable ResourceMonitorFeature feature;
@@ -46,9 +48,13 @@ public class ResourceMonitorState {
     private long cachedBalanceLong = Long.MIN_VALUE;
     private boolean cachedBalancePositive = false;
     private String cachedBalanceText = "+0";
+    private @Nullable String cachedBalancePrefix;
+    private String cachedBalanceLine = "+0";
     private long cachedStoredLong = Long.MIN_VALUE;
     private long cachedCapacityLong = Long.MIN_VALUE;
     private String cachedStoredText = "0 / 0";
+    private @Nullable String cachedStoredPrefix;
+    private String cachedStoredLine = "0 / 0";
     private float lastTotalBalance = 0f;
     private float lastTotalStored = 0f;
     private float lastTotalCapacity = 0f;
@@ -122,6 +128,8 @@ public class ResourceMonitorState {
     public void reset() {
         usedItems.clear();
         usedUnits.clear();
+        discoveredItems.clear();
+        discoveredUnits.clear();
         usedItemsSignal.set(new Seq<>());
         usedUnitsSignal.set(new Seq<>());
         lastSnapshot.clear();
@@ -132,8 +140,10 @@ public class ResourceMonitorState {
         unitFormatCountCache.clear();
         unitFormatTextCache.clear();
         cachedBalanceLong = Long.MIN_VALUE;
+        cachedBalancePrefix = null;
         cachedStoredLong = Long.MIN_VALUE;
         cachedCapacityLong = Long.MIN_VALUE;
+        cachedStoredPrefix = null;
         lastTotalBalance = 0f;
         lastTotalStored = 0f;
         lastTotalCapacity = 0f;
@@ -180,6 +190,7 @@ public class ResourceMonitorState {
                 Item item = allItems.get(i);
                 int count = coreItems.get(item);
                 if (count > 0) {
+                    discoveredItems.add(item);
                     if (usedItems.add(item)) {
                         itemsChanged = true;
                         changed = true;
@@ -189,6 +200,9 @@ public class ResourceMonitorState {
                         itemsChanged = true;
                         changed = true;
                     }
+                } else if (discoveredItems.contains(item) && usedItems.add(item)) {
+                    itemsChanged = true;
+                    changed = true;
                 }
             }
             if (itemsChanged) {
@@ -217,6 +231,7 @@ public class ResourceMonitorState {
                         changed = true;
                     }
                     if (count > 0) {
+                        discoveredUnits.add(unit);
                         if (usedUnits.add(unit)) {
                             unitsChanged = true;
                             changed = true;
@@ -226,6 +241,9 @@ public class ResourceMonitorState {
                             unitsChanged = true;
                             changed = true;
                         }
+                    } else if (discoveredUnits.contains(unit) && usedUnits.add(unit)) {
+                        unitsChanged = true;
+                        changed = true;
                     }
                 } catch (Throwable ignored) {
                 }
@@ -271,9 +289,11 @@ public class ResourceMonitorState {
         this.selectedTeamSignal.set(team);
         if (Vars.state != null && Vars.state.isGame()) {
             this.usedItems.clear();
+            this.discoveredItems.clear();
             this.usedItemsSignal.set(new Seq<>());
         }
         this.usedUnits.clear();
+        this.discoveredUnits.clear();
         this.usedUnitsSignal.set(new Seq<>());
         lastSnapshot.clear();
         rateDisplay.clear();
@@ -283,8 +303,10 @@ public class ResourceMonitorState {
         unitFormatCountCache.clear();
         unitFormatTextCache.clear();
         cachedBalanceLong = Long.MIN_VALUE;
+        cachedBalancePrefix = null;
         cachedStoredLong = Long.MIN_VALUE;
         cachedCapacityLong = Long.MIN_VALUE;
+        cachedStoredPrefix = null;
         this.teamGraphs.clear();
         this.teamGraphsSignal.set(new Seq<>());
         tickSignal.set(tickSignal.get() + 1);
@@ -310,12 +332,19 @@ public class ResourceMonitorState {
     public void refreshZeroFilters() {
         if (Vars.content != null) {
             boolean hideZeroItems = feature != null && Boolean.TRUE.equals(feature.hideZeroItemsConfig.get());
-            if (hideZeroItems && coreItems != null) {
+            if (coreItems != null) {
                 boolean itemsChanged = false;
                 Seq<Item> allItems = Vars.content.items();
                 for (int i = 0; i < allItems.size; i++) {
                     Item item = allItems.get(i);
-                    if (coreItems.get(item) <= 0 && usedItems.remove(item)) {
+                    if (usedItems.contains(item)) {
+                        discoveredItems.add(item);
+                    }
+                    if (hideZeroItems) {
+                        if (coreItems.get(item) <= 0 && usedItems.remove(item)) {
+                            itemsChanged = true;
+                        }
+                    } else if (discoveredItems.contains(item) && usedItems.add(item)) {
                         itemsChanged = true;
                     }
                 }
@@ -331,13 +360,20 @@ public class ResourceMonitorState {
                 }
             }
             boolean hideZeroUnits = feature != null && Boolean.TRUE.equals(feature.hideZeroUnitsConfig.get());
-            if (hideZeroUnits && selectedTeam != null) {
+            if (selectedTeam != null) {
                 boolean unitsChanged = false;
                 Seq<UnitType> allUnits = Vars.content.units();
                 for (int i = 0; i < allUnits.size; i++) {
                     UnitType unit = allUnits.get(i);
+                    if (usedUnits.contains(unit)) {
+                        discoveredUnits.add(unit);
+                    }
                     int count = lastUnitCounts.get(unit, 0);
-                    if (count <= 0 && usedUnits.remove(unit)) {
+                    if (hideZeroUnits) {
+                        if (count <= 0 && usedUnits.remove(unit)) {
+                            unitsChanged = true;
+                        }
+                    } else if (discoveredUnits.contains(unit) && usedUnits.add(unit)) {
                         unitsChanged = true;
                     }
                 }
@@ -467,8 +503,18 @@ public class ResourceMonitorState {
             cachedBalanceLong = val;
             cachedBalancePositive = pos;
             cachedBalanceText = (pos ? "+" : "") + UI.formatAmount(val);
+            cachedBalancePrefix = null;
         }
         return cachedBalanceText;
+    }
+
+    public String getFormattedPowerLine(String prefix) {
+        String balance = getFormattedPowerBalance();
+        if (!prefix.equals(cachedBalancePrefix)) {
+            cachedBalancePrefix = prefix;
+            cachedBalanceLine = prefix + balance;
+        }
+        return cachedBalanceLine;
     }
 
     public Color getPowerBalanceColor() {
@@ -498,8 +544,18 @@ public class ResourceMonitorState {
             cachedStoredLong = stored;
             cachedCapacityLong = cap;
             cachedStoredText = UI.formatAmount(stored) + " / " + UI.formatAmount(cap);
+            cachedStoredPrefix = null;
         }
         return cachedStoredText;
+    }
+
+    public String getFormattedStoredLine(String prefix) {
+        String stored = getFormattedStoredPower();
+        if (!prefix.equals(cachedStoredPrefix)) {
+            cachedStoredPrefix = prefix;
+            cachedStoredLine = prefix + stored;
+        }
+        return cachedStoredLine;
     }
 
     public CharSequence formatItem(@Nullable Item item) {
