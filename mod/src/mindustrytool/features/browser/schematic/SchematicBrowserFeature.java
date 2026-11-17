@@ -12,12 +12,9 @@ import mindustrytool.features.Feature;
 import mindustrytool.features.FeatureMetadata;
 
 import solim.overlay.SolimDialog;
+import solim.reactive.Readable;
+import arc.scene.Element;
 
-/**
- * Feature for browsing, searching, and downloading schematics from the online
- * library. Supports in-game placement, clipboard copying, and local library
- * saving.
- */
 public class SchematicBrowserFeature extends Feature {
 
     private @Nullable SchematicBrowserDialog dialog;
@@ -32,7 +29,7 @@ public class SchematicBrowserFeature extends Feature {
                 .quickAccess(false)
                 .build());
 
-        bindDialog("schematicBrowser", KeyCode.unset, this::showDialog);
+        bindDialog("schematicbrowser", KeyCode.unset, this::showDialog);
     }
 
     @Override
@@ -65,6 +62,21 @@ public class SchematicBrowserFeature extends Feature {
             dialog = new SchematicBrowserDialog();
         }
         dialog.show();
+    }
+
+    @Override
+    public void onQuickAccessClick(@Nullable Element anchor) {
+        showDialog();
+    }
+
+    @Override
+    public void onQuickAccessClick() {
+        showDialog();
+    }
+
+    @Override
+    public Readable<Boolean> quickAccessHighlight() {
+        return Readable.of(true);
     }
 
     private void injectBrowseButton() {

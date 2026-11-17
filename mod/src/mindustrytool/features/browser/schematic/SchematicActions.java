@@ -8,21 +8,13 @@ import mindustry.game.Schematic;
 import mindustry.game.Schematics;
 import mindustrytool.models.response.TagData;
 import mindustrytool.services.MindustryTool;
+import solim.overlay.SolimDialog;
 
-/**
- * Utility actions for schematic operations: clipboard copy, local library
- * save, and in-game placement. Downloaded bytes are canonicalized through
- * parsing, mirroring the legacy browser behavior.
- */
 public final class SchematicActions {
 
     private SchematicActions() {
     }
 
-    /**
-     * Downloads the schematic, parses it, and copies its canonical Base64
-     * representation to the clipboard.
-     */
     public static CompletableFuture<Void> copyToClipboard(String itemId) {
         return MindustryTool.downloadSchematic(itemId).thenAccept(bytes -> {
             Core.app.post(() -> {
@@ -37,10 +29,6 @@ public final class SchematicActions {
         }).exceptionally(SchematicActions::notifyDownloadError);
     }
 
-    /**
-     * Downloads the schematic, attaches its server tags as labels, and adds it
-     * to the local schematic library.
-     */
     public static CompletableFuture<Void> saveToLocal(String itemId) {
         return MindustryTool.downloadSchematic(itemId).thenAccept(bytes -> {
             MindustryTool.findSchematic(itemId).whenComplete((detail, throwable) -> {
@@ -66,15 +54,12 @@ public final class SchematicActions {
         }).exceptionally(SchematicActions::notifyDownloadError);
     }
 
-    /**
-     * Downloads the schematic and attaches it to the player's placement cursor
-     * for direct in-game placement.
-     */
-    public static CompletableFuture<Void> placeInGame(String itemId) {
+    public static CompletableFuture<Void> placeInGame(String itemId, SolimDialog dialog) {
         return MindustryTool.downloadSchematic(itemId).thenAccept(bytes -> {
             Core.app.post(() -> {
                 try {
                     Vars.control.input.useSchematic(parse(bytes));
+                    dialog.hide();
                 } catch (Exception e) {
                     Vars.ui.showErrorMessage(
                             Core.bundle.format("browser.schematic.place-error", e.getMessage()));
@@ -83,10 +68,6 @@ public final class SchematicActions {
         }).exceptionally(SchematicActions::notifyDownloadError);
     }
 
-    /**
-     * Returns true when the player is in an active match where placing
-     * schematics is allowed.
-     */
     public static boolean canPlaceInGame() {
         return Vars.state.isGame() && Vars.state.rules.schematicsAllowed;
     }

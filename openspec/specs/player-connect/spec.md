@@ -34,11 +34,23 @@ The system SHALL synchronize the active room directory in real time by managing 
 - **THEN** the custom provider is validated, added to the provider list, and persisted in `Core.settings`
 
 ### Requirement: Declarative Solim Host and Manage Dialogs
-The system SHALL provide declarative Solim dialogs for hosting and managing relay rooms. `HostRoomDialog` SHALL guide the user through setting the room name, password, max player limit, auto-accept toggle, and selecting a relay server provider with live ping checks. `ManageRoomDialog` SHALL display active room status, a button to copy the join link to the clipboard, and a button to close the room. A button in Mindustry's pause menu (`Vars.ui.paused`) SHALL dynamically open `HostRoomDialog` or `ManageRoomDialog` depending on whether a room is currently active.
+The system SHALL provide declarative Solim dialogs for hosting and managing relay rooms. `HostRoomDialog` SHALL guide the user through setting the room name, password, max player limit, auto-accept toggle, and selecting a relay server provider with live concurrent ping checks. The provider list SHALL reactively observe provider updates. Provider pings SHALL execute concurrently via raw TCP socket handshakes with an 8-second timeout, displaying latency independently as each server responds. Custom relay providers SHALL display a delete button that prompts for confirmation before removing the provider. `ManageRoomDialog` SHALL display active room status, a button to copy the join link to the clipboard, and a button to close the room. A button in Mindustry's pause menu (`Vars.ui.paused`) SHALL dynamically open `HostRoomDialog` or `ManageRoomDialog` depending on whether a room is currently active.
 
 #### Scenario: Host room dialog configuration
 - **WHEN** the host opens `HostRoomDialog`
 - **THEN** room configurations (name, password, max players, auto-accept) are bound to reactive inputs, and the provider list displays live ping status for each server
+
+#### Scenario: Concurrent provider pinging
+- **WHEN** the provider selection screen in `HostRoomDialog` is shown or refreshed
+- **THEN** all providers are pinged concurrently using TCP socket connections with an 8-second timeout, and each provider displays its ping in milliseconds as soon as its handshake completes without waiting for other providers
+
+#### Scenario: Provider ping timeout
+- **WHEN** a relay provider does not complete the TCP connection within 8 seconds
+- **THEN** that provider's ping status updates to timeout independently without blocking other providers
+
+#### Scenario: Removing a custom provider
+- **WHEN** a user clicks the delete button on a custom provider card and confirms the prompt
+- **THEN** the provider is removed from settings, the reactive provider list updates immediately, and any active selection on that provider is cleared
 
 #### Scenario: Pause menu button state
 - **WHEN** the game is paused while hosting a room
@@ -56,11 +68,15 @@ When `autoAccept` is disabled and an incoming guest joins a hosted game, the gue
 - **THEN** the guest connection is cleanly closed with an informative rejection message, and the HUD banner disappears
 
 ### Requirement: Solim Room Browser and Mod Compatibility in Join Dialog
-The system SHALL inject a Solim room browser section into Mindustry's `JoinDialog` (`Vars.ui.join`), displaying active PlayerConnect rooms reactively updated from the rooms query using `QueryView`. Each room card SHALL show the room name, map name, gamemode, player count, lock status, and mod compatibility. If mod differences exist between client and server, the system SHALL display badges indicating missing or unneeded mods and provide a `JoinWarningDialog` offering to disable unneeded mods before connecting.
+The system SHALL inject a Solim room browser section into Mindustry's `JoinDialog` (`Vars.ui.join`), displaying active PlayerConnect rooms reactively updated from the rooms query using `QueryView`. Each room card SHALL show the room name, map name, gamemode, player count, lock status, and mod compatibility. If mod differences exist between client and server, the system SHALL display badges indicating missing or unneeded mods and provide a `JoinWarningDialog` offering to disable unneeded mods before connecting. When `feature.getRoomsQuery().refetch()` is triggered, the room browser SHALL display the loading state while fetching and SHALL render the newly fetched rooms once the refetch completes.
 
 #### Scenario: Room browser reactive display
 - **WHEN** Mindustry's Join Game screen is opened
 - **THEN** the PlayerConnect room section renders room cards using `QueryView` that update automatically as the query data changes
+
+#### Scenario: Manual refetch updates room list after loading
+- **WHEN** the user triggers `feature.getRoomsQuery().refetch()` while rooms are displayed and the fetch completes with updated rooms
+- **THEN** the room browser displays the loading state while fetching and updates to display the newly fetched rooms once fetching completes
 
 #### Scenario: Mod mismatch warning on join
 - **WHEN** a user clicks to join a room requiring different mods
@@ -68,7 +84,8 @@ The system SHALL inject a Solim room browser section into Mindustry's `JoinDialo
 
 ### Requirement: Unified Room Query State
 `PlayerConnectFeature` SHALL use `roomsQuery` as the single source of truth for rooms and SHALL NOT maintain a duplicate `rooms` signal or bridge effects.
-- `getRooms()` SHALL expose a readable derived directly from `roomsQuery.data()`.
+- `getRooms()` SHALL return a single feature-owned `Readable` derived from `roomsQuery.data()` without allocating a new `Computed` on every call.
+- `roomsQuery` SHALL bind its active state to `PlayerConnectFeature.enabled()` and SHALL NOT be permanently disposed in `onDisable()` so that disabling and re-enabling the feature resumes room querying and `refetch()`.
 - Real-time room updates from SSE SHALL mutate `roomsQuery` directly via `roomsQuery.mutate(...)`.
 
 #### Scenario: SSE update mutates roomsQuery
@@ -77,5 +94,76 @@ The system SHALL inject a Solim room browser section into Mindustry's `JoinDialo
 
 #### Scenario: getRooms derives from roomsQuery
 - **WHEN** components observe `feature.getRooms()`
-- **THEN** they SHALL receive updates directly reflecting `roomsQuery.data()`
+- **THEN** they SHALL receive updates directly reflecting `roomsQuery.data()` without creating per-call reactive allocations
+
+#### Scenario: Re-enabling feature preserves roomsQuery
+- **WHEN** `PlayerConnectFeature` is disabled via `disable()` and later re-enabled via `enable()`
+- **THEN** `roomsQuery` SHALL NOT be permanently disposed and `feature.getRoomsQuery().refetch()` SHALL still execute fetches and update `getRooms()`
+
+### Requirement: Save room password
+The system MUST save passwords using per-room string keys.
+
+#### Scenario: Save password
+- **WHEN** user joins a room with a password
+- **THEN** system saves the password securely using `player-connect.pwd-<roomId>` key in settings
+
+### Requirement: Retrieve room password
+The system MUST retrieve passwords using per-room string keys.
+
+#### Scenario: Retrieve password
+- **WHEN** user opens a room prompt that requires a password
+- **THEN** system populates the password field with the saved password if available
+
+### Requirement: Relay room lifetime bound to local hosting
+
+`PlayerConnectFeature` SHALL close the active relay room when the local player stops
+hosting a server, and SHALL NOT close the room merely because the world was reloaded.
+
+Hosting loss SHALL be observed from `ProxyProvider.closeServer()`. `Signals.netServer()`
+SHALL NOT be used for this: `Signals` is event-driven and `ArcNetProvider.closeServer()`
+fires no event, so the `true` to `false` transition is unobservable while only relay
+guests are connected.
+
+A world reload that does not close the local server SHALL leave the room open, including
+its `ProxyProvider` installation and all connected `VirtualConnection` instances.
+
+The room SHALL continue to close when the local player becomes a client
+(`ClientServerConnectEvent`) and when a new local server is started (`HostEvent`).
+
+#### Scenario: Host changes campaign map
+
+- **WHEN** a host with an active relay room selects a different map from the campaign
+  planet map
+- **THEN** the relay room stays open
+- **AND** connected guests remain connected
+- **AND** no room-closed notification is shown
+
+#### Scenario: Host loads a save
+
+- **WHEN** a host with an active relay room loads a save
+- **THEN** the relay room stays open
+
+#### Scenario: Host quits to menu
+
+- **WHEN** a host with an active relay room quits to the menu and `Net.closeServer()` is
+  reached
+- **THEN** `ProxyProvider.closeServer()` signals the room closed
+- **AND** the room is torn down and a room-closed notification is shown
+
+#### Scenario: Host becomes a client
+
+- **WHEN** the local player connects to another server while hosting
+- **THEN** the relay room is closed
+
+#### Scenario: Proxy provider survives world reload
+
+- **WHEN** the world is reloaded while a relay room is active
+- **THEN** `Vars.net.provider` remains the `ProxyProvider`
+- **AND** previously connected `VirtualConnection` instances remain connected
+
+#### Scenario: Repeated close is idempotent
+
+- **WHEN** `closeRoom()` is called more than once
+- **THEN** `ProxyProvider` is restored exactly once
+- **AND** `PcRoomClosed` is not fired when no room was active
 

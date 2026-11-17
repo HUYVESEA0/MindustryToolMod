@@ -2,10 +2,14 @@ package mindustrytool.features.chat.state;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import arc.scene.Element;
+import arc.scene.ui.layout.Table;
 import java.util.Arrays;
 import java.util.List;
 import mindustrytool.models.response.ChatMessage;
 import org.junit.jupiter.api.Test;
+import solim.core.Component;
+import solim.reactive.Readable;
 import solim.reactive.Signal;
 import solim.test.SolimEnv;
 
@@ -92,7 +96,7 @@ class ChatMessagesTest extends SolimEnv {
         ChatMessages messages = new ChatMessages(activeId);
 
         messages.append(msg("temp_123", "ch1", "Sending..."));
-        // SSE delivers real message first before HTTP POST returns
+
         messages.append(msg("server_999", "ch1", "Live delivery"));
 
         ChatMessage real = msg("server_999", "ch1", "Live delivery");
@@ -157,16 +161,47 @@ class ChatMessagesTest extends SolimEnv {
         assertEquals("Connection timed out", messages.currentActiveError());
         assertEquals("Connection timed out", messages.activeError().get());
 
-        // Channel switch reflects respective channel's state
         activeId.set("ch2");
         assertFalse(messages.isActiveLoadingInitial());
         assertNull(messages.currentActiveError());
 
-        // Replace clears error
         activeId.set("ch1");
         assertEquals("Connection timed out", messages.currentActiveError());
         messages.replace("ch1", Arrays.asList(msg("10", "ch1", "Hi")));
         assertNull(messages.currentActiveError());
         assertEquals(1, messages.active().get().size());
+    }
+
+    @Test
+    void testForChannelRetainsReactivityAfterComponentRebuild() {
+        Signal<String> activeId = Signal.of("ch1");
+        ChatMessages chatMessages = new ChatMessages(activeId);
+
+        Component comp1 = new Component() {
+            @Override
+            protected Element build() {
+                Readable<List<ChatMessage>> binding = chatMessages.forChannel("ch1");
+                assertTrue(binding.get().isEmpty());
+                return new Table();
+            }
+        };
+        comp1.element();
+        comp1.dispose();
+
+        Component comp2 = new Component() {
+            @Override
+            protected Element build() {
+                Readable<List<ChatMessage>> binding = chatMessages.forChannel("ch1");
+                assertTrue(binding.get().isEmpty());
+
+                chatMessages.append(msg("m1", "ch1", "Hello"));
+
+                assertEquals(1, binding.get().size());
+                assertEquals("m1", binding.get().get(0).getId());
+                return new Table();
+            }
+        };
+        comp2.element();
+        comp2.dispose();
     }
 }

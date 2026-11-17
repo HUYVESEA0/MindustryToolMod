@@ -16,17 +16,16 @@ import mindustry.gen.Icon;
 import mindustrytool.components.FileIcon;
 import mindustrytool.features.Feature;
 import mindustrytool.features.FeatureMetadata;
+import mindustrytool.ui.dock.DockPositionConfig;
+import mindustrytool.ui.dock.MindustryDockRegistry;
 import solim.config.ConfigGroup;
 import solim.config.ConfigValue;
 import solim.config.ContextualConfigValue;
 import arc.scene.ui.layout.Scl;
+import solim.reactive.Effect;
 import solim.reactive.Signal;
 import solim.reactive.Signals;
 
-/**
- * Feature responsible for registering and managing the Team Resource Tracker
- * overlay. Follows Solim architecture and ConfigGroup reactive configuration.
- */
 public class TeamResourceFeature extends Feature {
 
     public final ConfigGroup config;
@@ -41,13 +40,18 @@ public class TeamResourceFeature extends Feature {
     public final ConfigValue<Boolean> showStoredPowerConfig;
     public final ConfigValue<Boolean> hideBackgroundConfig;
     public final ConfigValue<Boolean> alwaysShowFlowRateConfig;
+    public final ConfigValue<Boolean> hideZeroUnitsConfig;
+    public final ConfigValue<Boolean> hideZeroItemsConfig;
     public final ConfigValue<Boolean> expandedConfig;
+    public final ConfigValue<Boolean> hideDragHandleConfig;
+    public final ConfigValue<Boolean> hideHeaderConfig;
 
     public final ContextualConfigValue<Float, Boolean> xConfig;
     public final ContextualConfigValue<Float, Boolean> yConfig;
 
     public final Signal<Float> xSignal;
     public final Signal<Float> ySignal;
+    public final DockPositionConfig dockPosition;
 
     private final TeamResourceState state;
     private @Nullable TeamResourceHudView hudView;
@@ -59,7 +63,8 @@ public class TeamResourceFeature extends Feature {
                 .icon(getFeatureIcon())
                 .order(0)
                 .enabledByDefault(true)
-                .quickAccess(true)
+                .quickAccess(false)
+                .displayGroup(true)
                 .build());
 
         config = configGroup();
@@ -75,7 +80,11 @@ public class TeamResourceFeature extends Feature {
         showStoredPowerConfig = config.boolValue("show-stored-power", false);
         hideBackgroundConfig = config.boolValue("hide-background", false);
         alwaysShowFlowRateConfig = config.boolValue("always-show-flow-rate", true);
+        hideZeroUnitsConfig = config.boolValue("hide-zero-units", true);
+        hideZeroItemsConfig = config.boolValue("hide-zero-items", false);
         expandedConfig = config.boolValue("expanded", true);
+        hideDragHandleConfig = config.boolValue("hide-drag-handle", false);
+        hideHeaderConfig = config.boolValue("hide-header", false);
 
         xConfig = config.floatValueKeyed(
                 "x",
@@ -135,10 +144,11 @@ public class TeamResourceFeature extends Feature {
 
         xSignal = xConfig.signal();
         ySignal = yConfig.signal();
+        dockPosition = new DockPositionConfig(config, xConfig, yConfig);
 
         this.state = new TeamResourceState(this);
 
-        Signals.isPortrait().subscribe(p -> {
+        Effect.of(Signals.isPortrait(), p -> {
             if (hudView != null) {
                 Core.app.post(hudView::keepInScreen);
             }
@@ -188,7 +198,11 @@ public class TeamResourceFeature extends Feature {
         showStoredPowerConfig.reset();
         hideBackgroundConfig.reset();
         alwaysShowFlowRateConfig.reset();
+        hideZeroUnitsConfig.reset();
+        hideZeroItemsConfig.reset();
         expandedConfig.reset();
+        hideDragHandleConfig.reset();
+        hideHeaderConfig.reset();
     }
 
     public void resetPosition() {
@@ -198,8 +212,7 @@ public class TeamResourceFeature extends Feature {
         float cx = sw > 0 ? Math.max(0f, (sw - width) / 2f) : 200f;
         float cy = getSceneHeight() > 0 ? getSceneHeight() / 2f : 200f;
 
-        xConfig.set(cx);
-        yConfig.set(cy);
+        dockPosition.resetTo(cx, cy);
 
         if (hudView != null) {
             Core.app.post(hudView::keepInScreen);
@@ -221,6 +234,7 @@ public class TeamResourceFeature extends Feature {
             el.name = "team-resources-hud";
             el.visible(() -> Vars.ui.hudfrag != null && Vars.ui.hudfrag.shown && Vars.state != null
                     && Vars.state.isGame());
+            MindustryDockRegistry.get().registerHud("team-resources", el);
 
             Core.settings.put("coreitems", false);
 
@@ -237,6 +251,7 @@ public class TeamResourceFeature extends Feature {
         if (hudView != null) {
             TeamResourceHudView view = hudView;
             hudView = null;
+            MindustryDockRegistry.get().unregisterHud("team-resources");
             Core.app.post(() -> {
                 view.element().remove();
                 view.dispose();

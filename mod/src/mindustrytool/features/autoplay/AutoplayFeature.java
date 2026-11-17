@@ -10,6 +10,7 @@ import arc.scene.Element;
 import arc.scene.style.TextureRegionDrawable;
 import arc.struct.ObjectMap;
 import arc.struct.Seq;
+import arc.util.Align;
 import arc.util.Nullable;
 import mindustry.Vars;
 import mindustry.game.EventType.Trigger;
@@ -18,6 +19,7 @@ import mindustry.gen.Unit;
 import mindustry.graphics.Drawf;
 import mindustry.graphics.Layer;
 import mindustry.graphics.Pal;
+import mindustry.ui.Fonts;
 import mindustrytool.components.FileIcon;
 import mindustrytool.features.Feature;
 import mindustrytool.features.FeatureManager;
@@ -29,6 +31,8 @@ import mindustrytool.features.autoplay.tasks.AutoplayTask;
 import mindustrytool.features.autoplay.tasks.BaseAutoplayAI;
 import mindustrytool.features.autoplay.tasks.FleeTask;
 import mindustrytool.features.autoplay.tasks.FollowAssistTask;
+import mindustrytool.features.autoplay.tasks.FactorySupplyTask;
+import mindustrytool.features.autoplay.tasks.HealUnitsTask;
 import mindustrytool.features.autoplay.tasks.MiningTask;
 import mindustrytool.features.autoplay.tasks.RebuildTask;
 import mindustrytool.features.autoplay.tasks.RepairTask;
@@ -40,6 +44,7 @@ import solim.config.ContextualConfigValue;
 import solim.config.OrderedSeqPersister;
 import solim.core.Units;
 import solim.overlay.SolimDialog;
+import solim.reactive.Effect;
 import solim.reactive.Readable;
 import solim.reactive.Signal;
 import solim.reactive.Signals;
@@ -51,9 +56,11 @@ public class AutoplayFeature extends Feature {
             FleeTask.ID,
             AttackTask.ID,
             RepairTask.ID,
+            HealUnitsTask.ID,
             FollowAssistTask.ID,
             SelfBuildTask.ID,
             RebuildTask.ID,
+            FactorySupplyTask.ID,
             MiningTask.ID);
 
     public static final String DISPLAY_HUD = "hud";
@@ -63,6 +70,7 @@ public class AutoplayFeature extends Feature {
     public final ConfigValue<Boolean> followUnit;
     public final ConfigValue<Seq<String>> taskOrder;
     public final ConfigValue<Seq<String>> disabledTasks;
+    public final ConfigValue<Seq<String>> hiddenTasks;
     public final ConfigValue<String> displayModeConfig;
     public final ConfigValue<Float> scaleConfig;
     public final ConfigValue<Boolean> hideDragHandleConfig;
@@ -76,10 +84,14 @@ public class AutoplayFeature extends Feature {
 
     private final ObjectMap<String, AutoplayTask> taskMap = new ObjectMap<>();
     private final Signal<Seq<AutoplayTask>> tasksSignal = Signal.of(new Seq<>());
+    private final Signal<Seq<AutoplayTask>> visibleTasksSignal = Signal.of(new Seq<>());
     private final Signal<String> currentTaskIdSignal = Signal.of(null);
     private @Nullable AutoplayTask currentTask;
     private @Nullable AutoplayHudView hudView;
     private boolean quickAccessHooked = false;
+
+    private int cachedCooldownTenths = -1;
+    private String cachedCooldownLabel = null;
 
     public AutoplayFeature() {
         super(FeatureMetadata.builder()
@@ -95,6 +107,7 @@ public class AutoplayFeature extends Feature {
         followUnit = config.boolValue("follow-unit", false);
         taskOrder = config.value("task-order", new Seq<>(), seqPersister);
         disabledTasks = config.value("disabled-tasks", new Seq<>(), seqPersister);
+        hiddenTasks = config.value("hidden-tasks", new Seq<>(), seqPersister);
         displayModeConfig = config.stringValue("displayMode", DISPLAY_POPUP);
         scaleConfig = config.floatValue("scale", 1f);
         hideDragHandleConfig = config.boolValue("hideDragHandle", false);
@@ -121,20 +134,22 @@ public class AutoplayFeature extends Feature {
         xSignal = xConfig.signal();
         ySignal = yConfig.signal();
 
-        displayModeConfig.signal().subscribe(mode -> updateHud());
+        Effect.of(displayModeConfig.signal(), mode -> updateHud());
 
         taskMap.put(SelfHealTask.ID, new SelfHealTask(this));
         taskMap.put(FleeTask.ID, new FleeTask(this));
         taskMap.put(AttackTask.ID, new AttackTask());
         taskMap.put(RepairTask.ID, new RepairTask());
+        taskMap.put(HealUnitsTask.ID, new HealUnitsTask());
         taskMap.put(FollowAssistTask.ID, new FollowAssistTask(this));
         taskMap.put(SelfBuildTask.ID, new SelfBuildTask());
         taskMap.put(RebuildTask.ID, new RebuildTask());
+        taskMap.put(FactorySupplyTask.ID, new FactorySupplyTask(this));
         taskMap.put(MiningTask.ID, new MiningTask(this));
 
         syncOrderedTasks();
 
-        bindToggle("autoPlay", KeyCode.unset);
+        bindToggle("autoplay", KeyCode.unset);
 
         Events.run(Trigger.update, this::update);
         Events.run(Trigger.draw, this::draw);
@@ -142,6 +157,31 @@ public class AutoplayFeature extends Feature {
 
     public Readable<Seq<AutoplayTask>> tasks() {
         return tasksSignal;
+    }
+
+    public Readable<Seq<AutoplayTask>> visibleTasks() {
+        return visibleTasksSignal;
+    }
+
+    public boolean isTaskVisible(String taskId) {
+        Seq<String> hidden = hiddenTasks.get();
+        return hidden == null || !hidden.contains(taskId);
+    }
+
+    public void setTaskVisible(String taskId, boolean visible) {
+        Seq<String> hidden = new Seq<>();
+        Seq<String> stored = hiddenTasks.get();
+        if (stored != null) {
+            hidden.addAll(stored);
+        }
+
+        if (visible) {
+            hidden.remove(taskId);
+        } else if (!hidden.contains(taskId)) {
+            hidden.add(taskId);
+        }
+        hiddenTasks.set(hidden);
+        syncOrderedTasks();
     }
 
     public boolean isTaskEnabled(String taskId) {
@@ -206,13 +246,19 @@ public class AutoplayFeature extends Feature {
     private void syncOrderedTasks() {
         Seq<String> order = getEffectiveOrder();
         Seq<AutoplayTask> orderedList = new Seq<>();
+        Seq<AutoplayTask> visibleList = new Seq<>();
+        Seq<String> hidden = hiddenTasks.get();
         for (String id : order) {
             AutoplayTask task = taskMap.get(id);
             if (task != null) {
                 orderedList.add(task);
+                if (hidden == null || !hidden.contains(id)) {
+                    visibleList.add(task);
+                }
             }
         }
         tasksSignal.set(orderedList);
+        visibleTasksSignal.set(visibleList);
     }
 
     @Override
@@ -303,7 +349,7 @@ public class AutoplayFeature extends Feature {
                 return;
             }
             quickAccessHooked = true;
-            quickAccess.enabled().subscribe(value -> updateHud());
+            Effect.of(quickAccess.enabled(), value -> updateHud());
         } catch (Exception ignored) {
         }
     }
@@ -335,6 +381,10 @@ public class AutoplayFeature extends Feature {
             view.element().remove();
             view.dispose();
         });
+    }
+
+    public @Nullable AutoplayTask getTask(String id) {
+        return taskMap.get(id);
     }
 
     public @Nullable AutoplayTask getCurrentTask() {
@@ -428,6 +478,25 @@ public class AutoplayFeature extends Feature {
             Draw.z(Layer.overlayUI);
             Draw.rect(icon.getRegion(), unit.x, unit.y + unit.hitSize * 2f, 10f, 10f);
             Draw.reset();
+        }
+
+        if (currentTask instanceof FactorySupplyTask) {
+            float cooldown = ((FactorySupplyTask) currentTask).cooldownSeconds();
+            if (cooldown > 0.05f && Fonts.outline != null) {
+                int tenths = (int) Math.round(cooldown * 10f);
+                if (tenths != cachedCooldownTenths || cachedCooldownLabel == null) {
+                    cachedCooldownTenths = tenths;
+                    cachedCooldownLabel = (tenths / 10f) + "s";
+                }
+                String label = cachedCooldownLabel;
+                Draw.z(Layer.overlayUI);
+                Fonts.outline.draw(label,
+                        unit.x, unit.y + unit.hitSize * 2f + 10f, Pal.accent, 0.25f, false, Align.center);
+                Draw.reset();
+            }
+        } else {
+            cachedCooldownTenths = -1;
+            cachedCooldownLabel = null;
         }
 
         Vec2 targetPos = currentTask.getTargetPos();

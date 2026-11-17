@@ -20,8 +20,6 @@ public final class ChatMessages {
     private final Signal<Map<String, Boolean>> loadingInitial = Signal.of(new HashMap<>());
     private final Signal<Map<String, String>> errors = Signal.of(new HashMap<>());
 
-    private final Map<String, Readable<List<ChatMessage>>> channelComputeds = new HashMap<>();
-
     private final Computed<List<ChatMessage>> active;
     private final Computed<Boolean> activeFullyLoaded;
     private final Computed<Boolean> activeLoadingInitial;
@@ -127,15 +125,10 @@ public final class ChatMessages {
         if (channelId == null) {
             return Readable.of(Collections.emptyList());
         }
-        Readable<List<ChatMessage>> existing = channelComputeds.get(channelId);
-        if (existing == null) {
-            existing = messages.map(map -> {
-                List<ChatMessage> list = map.get(channelId);
-                return list != null ? list : Collections.emptyList();
-            });
-            channelComputeds.put(channelId, existing);
-        }
-        return existing;
+        return messages.map(map -> {
+            List<ChatMessage> list = map.get(channelId);
+            return list != null ? list : Collections.emptyList();
+        });
     }
 
     public Readable<Boolean> fullyLoaded(@Nullable String channelId) {
@@ -205,7 +198,6 @@ public final class ChatMessages {
         String chId = realMsg.getChannelId();
         List<ChatMessage> list = copyChannel(chId);
 
-        // If real message already arrived (e.g. via live stream), simply remove tempId
         if (containsMessage(list, realMsg.getId())) {
             boolean removed = removeMessage(list, tempId);
             if (removed) {
@@ -214,7 +206,6 @@ public final class ChatMessages {
             return removed;
         }
 
-        // Replace tempId with realMsg in place
         for (int i = 0; i < list.size(); i++) {
             if (Objects.equals(list.get(i).getId(), tempId)) {
                 list.set(i, realMsg);

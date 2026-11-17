@@ -1,7 +1,6 @@
 package solim.overlay;
 
 import arc.Core;
-import arc.Events;
 import arc.func.Cons;
 import arc.input.KeyCode;
 import arc.scene.Element;
@@ -9,53 +8,44 @@ import arc.scene.Group;
 import arc.scene.event.InputEvent;
 import arc.scene.event.InputListener;
 import arc.scene.event.Touchable;
-import arc.scene.style.Drawable;
 import arc.scene.ui.layout.Table;
 import arc.util.Nullable;
-import java.util.ArrayList;
-import java.util.List;
 import mindustry.game.EventType.ResizeEvent;
 import solim.core.Component;
-import solim.core.Disposable;
+import solim.core.OwnershipContext;
 import solim.core.SolimToken;
-import solim.modifier.CellConfig;
 import solim.layout.Row;
+import solim.modifier.Configurable;
+import solim.modifier.TableCapability;
 import solim.modifier.PendingCellConfig;
-import solim.modifier.ElementConfig;
-import solim.modifier.TableConfig;
-import solim.runtime.OwnershipContext;
+import solim.modifier.Props;
 import solim.runtime.AttachmentStack;
-import solim.reactive.Effect;
-import solim.reactive.Readable;
 import solim.reactive.Signal;
 import arc.scene.event.ClickListener;
 import arc.scene.event.EventListener;
 import arc.scene.ui.Button;
 import arc.scene.ui.layout.Scl;
+import solim.modifier.ContainerCapability;
 
-/**
- * Floating non-modal HUD overlay component. Root element defaults to
- * {@link Touchable#childrenOnly} so background touches pass through. Content
- * children are nested within an inner enabled container. Automatically adapts
- * to screen resize events via {@link #keepInScreen()}.
- */
-public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, TableConfig<Hud> {
+public class Hud extends Component
+        implements Configurable<Hud>, TableCapability, ContainerCapability<Hud> {
+
+    private static final float MIN_VIEWPORT_SIZE = 100f;
 
     private final Table root;
     private final Table container;
     private final PendingCellConfig constraints = new PendingCellConfig();
-    private final List<Disposable> bindings = new ArrayList<>();
-    private final Cons<ResizeEvent> resizeListener;
+    private @Nullable Props<Hud> pending;
     private @Nullable Signal<Float> boundXSignal;
     private @Nullable Signal<Float> boundYSignal;
-    private boolean disposed = false;
+    private @Nullable DockEngine dockEngine;
+    private @Nullable DockAnchorStore dockStore;
+    private @Nullable String dockTargetId;
+    private @Nullable DockGuideRenderer dockGuide;
 
     public static class HudRootTable extends Table {
-        private final Hud hud;
 
-        public HudRootTable(Hud hud) {
-            this.hud = hud;
-        }
+        private @Nullable Hud hud;
 
         @Override
         public void validate() {
@@ -65,7 +55,7 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
                 if (pw > 0f && ph > 0f && (Math.abs(getWidth() - pw) > 1.0f || Math.abs(getHeight() - ph) > 1.0f)) {
                     setSize(pw, ph);
                     if (hud != null) {
-                        hud.keepInScreen(false);
+                        hud.keepInScreen();
                     }
                 }
             }
@@ -74,7 +64,13 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
     }
 
     public Hud() {
-        this.root = new HudRootTable(this);
+        this(new HudRootTable());
+    }
+
+    private Hud(HudRootTable root) {
+        super(root);
+        this.root = root;
+        root.hud = this;
         this.root.name = "solim-hud-root";
         this.root.touchable = Touchable.childrenOnly;
         this.root.toFront();
@@ -88,18 +84,28 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
 
         this.root.add(container).pad(0).margin(0);
 
-        this.resizeListener = e -> {
+        Cons<ResizeEvent> resizeListener = e -> {
             keepInScreen();
-            Core.app.post(this::keepInScreen);
+            Core.app.post(this::keepInScreenIfLive);
         };
-        Events.on(ResizeEvent.class, resizeListener);
+        listen(ResizeEvent.class, resizeListener);
+    }
 
-        OwnershipContext.register(this);
+    private void keepInScreenIfLive() {
+        if (!isDisposed()) {
+            keepInScreen();
+        }
     }
 
     @Override
-    public Element element() {
-        return root;
+    protected void onDispose() {
+        if (dockGuide != null) {
+            dockGuide.hide();
+            dockGuide = null;
+        }
+        if (Core.scene != null) {
+            Core.scene.unfocus(root);
+        }
     }
 
     public Table root() {
@@ -116,17 +122,7 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
     }
 
     public Table table() {
-        return root;
-    }
-
-    public Hud touchable(Touchable touchable) {
-        root.touchable = touchable;
-        return this;
-    }
-
-    public Hud containerTouchable(Touchable touchable) {
-        container.touchable = touchable;
-        return this;
+        return container;
     }
 
     public Hud toFrontOnTouch() {
@@ -173,21 +169,9 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
         return null;
     }
 
-    public Hud background(@Nullable Drawable bg) {
-        container.background(bg);
-        return this;
-    }
-
-    public Hud background(@Nullable Readable<Drawable> bg) {
-        if (bg != null) {
-            Effect e = Effect.of(() -> container.background(bg.get()));
-            bindings.add(e);
-            OwnershipContext.register(e);
-        }
-        return this;
-    }
-
     public Hud children(@Nullable Runnable r) {
+        applyPendingProps();
+        OwnershipContext.push(this);
         AttachmentStack.push(container, Row.ATTACHER);
         try {
             if (r != null) {
@@ -195,6 +179,7 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
             }
         } finally {
             AttachmentStack.pop();
+            OwnershipContext.pop();
         }
         root.pack();
         return this;
@@ -206,64 +191,6 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
 
     public void bindYSignal(@Nullable Signal<Float> ySignal) {
         this.boundYSignal = ySignal;
-    }
-
-    public Hud x(Readable<Float> x) {
-        if (x instanceof Signal) {
-            this.boundXSignal = (Signal<Float>) x;
-        }
-        ElementConfig.super.x(x);
-        return this;
-    }
-
-    public Hud y(Readable<Float> y) {
-        if (y instanceof Signal) {
-            this.boundYSignal = (Signal<Float>) y;
-        }
-        ElementConfig.super.y(y);
-        return this;
-    }
-
-    @Override
-    public Hud opacity(float a) {
-        float val = Math.max(0f, Math.min(1f, a));
-        root.color.a = val;
-        container.color.a = val;
-        return this;
-    }
-
-    @Override
-    public Hud opacity(@Nullable Readable<Float> opacity) {
-        if (opacity == null)
-            return this;
-        Effect e = Effect.of(() -> {
-            Float v = opacity.get();
-            if (v != null)
-                opacity(v);
-        });
-        bindings.add(e);
-        OwnershipContext.register(e);
-        return this;
-    }
-
-    public Hud scale(float s) {
-        container.setScale(s);
-        return this;
-    }
-
-    public Hud scale(Readable<Float> s) {
-        if (s != null) {
-            Effect e = Effect.of(() -> {
-                Float v = s.get();
-                if (v != null) {
-                    container.setScale(v);
-                    root.pack();
-                }
-            });
-            bindings.add(e);
-            OwnershipContext.register(e);
-        }
-        return this;
     }
 
     public Hud draggable(Element handle) {
@@ -280,8 +207,67 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
         return this;
     }
 
+    public Hud dockable(@Nullable Element handle, DockEngine engine) {
+        return dockable(handle, engine, null, null, null, null);
+    }
+
+    public Hud dockable(@Nullable Element handle, DockEngine engine, @Nullable DockAnchorStore store) {
+        return dockable(handle, engine, store, null, null, null);
+    }
+
+    public Hud dockable(@Nullable Element handle, DockEngine engine, @Nullable DockAnchorStore store,
+            @Nullable String targetId) {
+        return dockable(handle, engine, store, null, null, targetId);
+    }
+
+    public Hud dockable(@Nullable Element handle, DockEngine engine, @Nullable DockAnchorStore store,
+            @Nullable Signal<Float> xSignal, @Nullable Signal<Float> ySignal, @Nullable String targetId) {
+        this.dockEngine = engine;
+        this.dockStore = store;
+        this.dockTargetId = targetId;
+        if (xSignal != null)
+            this.boundXSignal = xSignal;
+        if (ySignal != null)
+            this.boundYSignal = ySignal;
+        installDrag(handle, this, xSignal, ySignal, engine, store, targetId);
+        return this;
+    }
+
     public static void makeDraggable(@Nullable Element handle, @Nullable Hud hud, @Nullable Signal<Float> xSignal,
             @Nullable Signal<Float> ySignal) {
+        installDrag(handle, hud, xSignal, ySignal, null, null, null);
+    }
+
+    public static void makeDockable(@Nullable Element handle, @Nullable Hud hud, DockEngine engine,
+            @Nullable DockAnchorStore store, @Nullable Signal<Float> xSignal, @Nullable Signal<Float> ySignal,
+            @Nullable String targetId) {
+        Hud target = hud != null ? hud : Hud.find(handle);
+        if (target != null) {
+            target.dockEngine = engine;
+            target.dockStore = store;
+            target.dockTargetId = targetId;
+        }
+        installDrag(handle, target, xSignal, ySignal, engine, store, targetId);
+    }
+
+    private DockGuideRenderer dockGuide() {
+        DockGuideRenderer current = dockGuide;
+        if (current == null) {
+            current = new DockGuideRenderer();
+            dockGuide = current;
+        }
+        return current;
+    }
+
+    private void hideDockGuide() {
+        if (dockGuide != null) {
+            dockGuide.hide();
+        }
+    }
+
+    private static void installDrag(@Nullable Element handle, @Nullable Hud hud, @Nullable Signal<Float> xSignal,
+            @Nullable Signal<Float> ySignal, @Nullable DockEngine dockEngine, @Nullable DockAnchorStore dockStore,
+            @Nullable String dockTargetId) {
         if (handle == null)
             return;
         handle.touchable = Touchable.enabled;
@@ -296,8 +282,13 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
             private float lastStageY;
             private float lastX;
             private float lastY;
+            private float dragStartX;
+            private float dragStartY;
+            private float dragOffsetX;
+            private float dragOffsetY;
             private boolean useStage = false;
             private boolean didDrag = false;
+            private @Nullable DockCandidate activeSnap;
 
             private @Nullable Hud resolveHud() {
                 Hud target = hud != null ? hud : Hud.find(handle);
@@ -310,6 +301,22 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
                 return target;
             }
 
+            private @Nullable DockCandidate storedSnap(Hud targetHud) {
+                if (dockEngine == null || dockStore == null) {
+                    return null;
+                }
+                DockAnchor anchor = dockStore.load();
+                if (anchor == null) {
+                    return null;
+                }
+                DockTarget target = dockEngine.find(anchor.targetId());
+                if (target == null || !target.active()) {
+                    return null;
+                }
+                Element root = targetHud.element();
+                return new DockCandidate(target, anchor.side(), root.x, root.y, anchor.offset(), 0f);
+            }
+
             @Override
             public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button) {
                 if (event != null && event.listenerActor != null && handle.getScene() == null)
@@ -320,6 +327,11 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
                 if (targetHud == null)
                     return false;
                 didDrag = false;
+                activeSnap = storedSnap(targetHud);
+                dragStartX = targetHud.element().x;
+                dragStartY = targetHud.element().y;
+                dragOffsetX = 0f;
+                dragOffsetY = 0f;
                 lastX = x;
                 lastY = y;
                 if (event != null && (event.stageX != 0f || event.stageY != 0f)) {
@@ -357,14 +369,44 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
                         }
                     }
                 }
-                targetHud.element().moveBy(dx, dy);
-                targetHud.keepInScreen();
-                if (xSignal != null) {
-                    xSignal.set(targetHud.element().x);
+                dragOffsetX += dx;
+                dragOffsetY += dy;
+
+                Element element = targetHud.element();
+                if (element.getWidth() <= 0f || element.getHeight() <= 0f) {
+                    targetHud.pack();
                 }
-                if (ySignal != null) {
-                    ySignal.set(targetHud.element().y);
+                float width = element.getWidth();
+                float height = element.getHeight();
+                float rawX = dragStartX + dragOffsetX;
+                float rawY = dragStartY + dragOffsetY;
+
+                if (dockEngine == null) {
+                    element.moveBy(dx, dy);
+                    targetHud.clampToViewport();
+                    targetHud.writePositionSignals(xSignal, ySignal);
+                    return;
                 }
+
+                if (activeSnap != null && dockEngine.breaksAway(activeSnap, rawX, rawY)) {
+                    activeSnap = null;
+                    targetHud.hideDockGuide();
+                }
+
+                if (activeSnap != null) {
+                    element.setPosition(activeSnap.x(), activeSnap.y());
+                } else {
+                    activeSnap = dockEngine.findSnap(rawX, rawY, width, height, dockTargetId);
+                    if (activeSnap != null) {
+                        element.setPosition(activeSnap.x(), activeSnap.y());
+                        targetHud.dockGuide().show(activeSnap, width, height);
+                    } else {
+                        element.setPosition(rawX, rawY);
+                        targetHud.hideDockGuide();
+                    }
+                }
+                targetHud.clampToViewport();
+                targetHud.writePositionSignals(xSignal, ySignal);
             }
 
             @Override
@@ -373,17 +415,28 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
                 if (targetHud == null)
                     return;
                 if (didDrag) {
-                    targetHud.keepInScreen();
-                    if (xSignal != null) {
-                        xSignal.set(targetHud.element().x);
+                    targetHud.clampToViewport();
+                    if (dockStore != null) {
+                        dockStore.save(activeSnap != null ? activeSnap.toAnchor() : null);
                     }
-                    if (ySignal != null) {
-                        ySignal.set(targetHud.element().y);
-                    }
+                    targetHud.writePositionSignals(xSignal, ySignal);
                 }
+                targetHud.hideDockGuide();
+                activeSnap = null;
                 didDrag = false;
             }
         });
+    }
+
+    private void writePositionSignals(@Nullable Signal<Float> xSignal, @Nullable Signal<Float> ySignal) {
+        Signal<Float> targetX = xSignal != null ? xSignal : boundXSignal;
+        Signal<Float> targetY = ySignal != null ? ySignal : boundYSignal;
+        if (targetX != null) {
+            targetX.set(root.x);
+        }
+        if (targetY != null) {
+            targetY.set(root.y);
+        }
     }
 
     private static boolean isInteractiveDescendant(@Nullable Element target, Element handle) {
@@ -403,20 +456,85 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
     }
 
     public void keepInScreen() {
-        keepInScreen(true);
+        float sw = viewportWidth();
+        float sh = viewportHeight();
+        if (isDegenerateViewport(sw, sh)) {
+            return;
+        }
+        applyDesiredPosition();
+        clampDisplay(sw, sh);
     }
 
-    public void keepInScreen(boolean updateSignals) {
-        float scl = Scl.scl();
-        float sw = Core.scene != null ? Core.scene.getWidth()
-                : (Core.graphics != null ? Core.graphics.getWidth() / (scl > 0f ? scl : 1f) : 0f);
-        float sh = Core.scene != null ? Core.scene.getHeight()
-                : (Core.graphics != null ? Core.graphics.getHeight() / (scl > 0f ? scl : 1f) : 0f);
-        if (sw <= 0f || sh <= 0f)
+    private void clampToViewport() {
+        float sw = viewportWidth();
+        float sh = viewportHeight();
+        if (isDegenerateViewport(sw, sh)) {
             return;
+        }
+        clampDisplay(sw, sh);
+    }
 
+    private float viewportWidth() {
+        if (Core.scene != null) {
+            return Core.scene.getWidth();
+        }
+        float scl = Scl.scl();
+        return Core.graphics != null ? Core.graphics.getWidth() / (scl > 0f ? scl : 1f) : 0f;
+    }
+
+    private float viewportHeight() {
+        if (Core.scene != null) {
+            return Core.scene.getHeight();
+        }
+        float scl = Scl.scl();
+        return Core.graphics != null ? Core.graphics.getHeight() / (scl > 0f ? scl : 1f) : 0f;
+    }
+
+    private static boolean isDegenerateViewport(float sw, float sh) {
+        return sw <= MIN_VIEWPORT_SIZE || sh <= MIN_VIEWPORT_SIZE;
+    }
+
+    private void applyDesiredPosition() {
+        if (applyDockPosition()) {
+            return;
+        }
+        if (boundXSignal != null) {
+            Float value = boundXSignal.peek();
+            if (value != null) {
+                root.x = value;
+            }
+        }
+        if (boundYSignal != null) {
+            Float value = boundYSignal.peek();
+            if (value != null) {
+                root.y = value;
+            }
+        }
+    }
+
+    private boolean applyDockPosition() {
+        if (dockEngine == null || dockStore == null) {
+            return false;
+        }
+        DockAnchor anchor = dockStore.load();
+        if (anchor == null) {
+            return false;
+        }
+        DockCandidate resolved = dockEngine.resolve(anchor, root.getWidth(), root.getHeight());
+        if (resolved != null) {
+            root.setPosition(resolved.x(), resolved.y());
+        } else {
+            root.setPosition(anchor.x(), anchor.y());
+        }
+        return true;
+    }
+
+    private void clampDisplay(float sw, float sh) {
         if (root.getWidth() <= 0f || root.getHeight() <= 0f) {
             root.pack();
+        }
+        if (root.getWidth() <= 0f || root.getHeight() <= 0f) {
+            return;
         }
 
         float w = root.getWidth();
@@ -435,15 +553,6 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
             curY = 0;
 
         root.setPosition(curX, curY);
-
-        if (updateSignals) {
-            if (boundXSignal != null && (boundXSignal.get() == null || Math.abs(boundXSignal.get() - curX) > 0.5f)) {
-                boundXSignal.set(curX);
-            }
-            if (boundYSignal != null && (boundYSignal.get() == null || Math.abs(boundYSignal.get() - curY) > 0.5f)) {
-                boundYSignal.set(curY);
-            }
-        }
     }
 
     public void pack() {
@@ -451,23 +560,19 @@ public class Hud implements Component, CellConfig<Hud>, ElementConfig<Hud>, Tabl
     }
 
     @Override
-    public void dispose() {
-        if (disposed)
-            return;
-        disposed = true;
-        if (Core.scene != null) {
-            Core.scene.unfocus(root);
-        }
-        Events.remove(ResizeEvent.class, resizeListener);
-        for (Disposable d : bindings) {
-            d.dispose();
-        }
-        bindings.clear();
+    public @Nullable Props<Hud> pendingProps() {
+        return pending;
     }
 
     @Override
-    public boolean isDisposed() {
-        return disposed;
+    public void setPendingProps(@Nullable Props<Hud> props) {
+        this.pending = props;
+    }
+
+    @Override
+    public Hud name(@Nullable String name) {
+        setName(name);
+        return this;
     }
 
     @Override

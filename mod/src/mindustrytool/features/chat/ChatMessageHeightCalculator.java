@@ -7,9 +7,11 @@ import arc.scene.ui.layout.Scl;
 import arc.util.Align;
 import arc.util.Nullable;
 import arc.util.pooling.Pools;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import mindustry.ui.Fonts;
+import mindustrytool.features.FeatureManager;
 import mindustrytool.features.chat.models.MessageGroup;
 import mindustrytool.features.chat.models.ParsedChatMessage;
 import mindustrytool.features.chat.models.ParsedChatMessage.CommandMessage;
@@ -19,40 +21,39 @@ import mindustrytool.features.chat.models.ParsedChatMessage.RoomInviteMessage;
 import mindustrytool.features.chat.models.ParsedChatMessage.SchematicMessage;
 import mindustrytool.features.chat.models.ParsedChatMessage.TextMessage;
 
-/**
- * Calculates and caches layout heights for chat message items given a container width.
- *
- * <p>Uses static heights for fixed layout structures (headers, avatars, cards, buttons)
- * and calculates wrapped text height using {@link GlyphLayout}.
- */
 public final class ChatMessageHeightCalculator {
 
-    // Fixed layout unit constants (matching UI.unit(1) = 4f)
     public static final float UNIT_1 = 4f;
-    public static final float AVATAR_SIZE = 48f; // unit(12)
-    public static final float AVATAR_GAP = 12f;   // unit(1.5f)
-    public static final float HEADER_HEIGHT = 24f; // unit(6) ellipsis button and title row
+    public static final float AVATAR_SIZE = 48f;
+    public static final float AVATAR_GAP = 12f;
+    public static final float HEADER_HEIGHT = 24f;
     public static final float REPLY_PREVIEW_HEIGHT = 24f;
-    public static final float REPLY_GAP = 2f; // unit(0.5f): gap between reply preview and message body
+    public static final float REPLY_GAP = 2f;
+    public static final float TOGGLE_CHIP_HEIGHT = 24f;
     public static final float SCHEMATIC_CARD_HEIGHT = 212f;
-    public static final float IMAGE_CARD_HEIGHT = 140f;
-    public static final float INVITE_CARD_HEIGHT = 200f; // unit(50)
+    public static final float IMAGE_CARD_HEIGHT = 120f;
+    public static final float INVITE_CARD_HEIGHT = 162f;
     public static final float TOOL_LINK_CARD_HEIGHT = 70f;
     public static final float COMMAND_CARD_HEIGHT = 70f;
-    public static final float HORIZONTAL_PADDINGS = 70f; // 4px outer left + 48px avatar + 6px gap + 4px inner left + 4px inner right + 4px outer right
-    public static final float MENTION_EXTRA_PADDING = 8f; // unit(1) divider width + unit(1) gap
-    public static final float MESSAGE_GAP = 3f; // unit(0.75f): gap between messages in a group
-    public static final float HEADER_GAP = 2f; // unit(0.5f): gap between group header and first message
+    public static final float HORIZONTAL_PADDINGS = 70f;
+    public static final float MENTION_EXTRA_PADDING = 8f;
+    public static final float MESSAGE_GAP = 3f;
+    public static final float HEADER_GAP = 2f;
     public static final float FONT_SCALE = 1.0f;
 
-    private static final Map<String, Float> HEIGHT_CACHE = new ConcurrentHashMap<>();
+    static final int MAX_CACHE_ENTRIES = 4096;
+
+    private static final Map<String, Float> HEIGHT_CACHE = Collections.synchronizedMap(
+            new LinkedHashMap<String, Float>(16, 0.75f, true) {
+                @Override
+                protected boolean removeEldestEntry(Map.Entry<String, Float> eldest) {
+                    return size() > MAX_CACHE_ENTRIES;
+                }
+            });
 
     private ChatMessageHeightCalculator() {
     }
 
-    /**
-     * Calculates the height for a message group at the specified container width.
-     */
     public static float calculateHeight(MessageGroup group, float containerWidth) {
         if (group == null || group.getMessageCount() == 0) {
             return Scl.scl(24f);
@@ -91,17 +92,30 @@ public final class ChatMessageHeightCalculator {
         float height = 0;
 
         boolean mentioned = (msg instanceof TextMessage) && ((TextMessage) msg).isMentionsCurrentUser();
-        float availableTextWidth = Math.max(20f, containerWidth - Scl.scl(HORIZONTAL_PADDINGS) - (mentioned ? Scl.scl(MENTION_EXTRA_PADDING) : 0f));
+        float availableTextWidth = Math.max(20f,
+                containerWidth - Scl.scl(HORIZONTAL_PADDINGS) - (mentioned ? Scl.scl(MENTION_EXTRA_PADDING) : 0f));
 
-        // Reply preview row
         if (msg.getReplyTo() != null && !msg.getReplyTo().isEmpty()) {
             height += Scl.scl(REPLY_PREVIEW_HEIGHT + REPLY_GAP);
         }
 
-        // Body height by type
         if (msg instanceof TextMessage) {
             TextMessage txt = (TextMessage) msg;
-            height += measureTextHeight(txt.getText(), availableTextWidth, FONT_SCALE);
+            String textToMeasure = txt.getText();
+            float extraHeight = 0f;
+
+            ChatFeature chatFeature = FeatureManager.getFeature(ChatFeature.class);
+            if (chatFeature != null) {
+                ChatStore store = chatFeature.getStore();
+                String translated = store.translations().getDirect(msg.getId());
+                if (translated != null && !translated.trim().isEmpty()) {
+                    boolean showOriginal = store.translations().isShowingOriginalDirect(msg.getId());
+                    textToMeasure = showOriginal ? txt.getText() : translated;
+                    extraHeight = Scl.scl(TOGGLE_CHIP_HEIGHT);
+                }
+            }
+
+            height += measureTextHeight(textToMeasure, availableTextWidth, FONT_SCALE) + extraHeight;
         } else if (msg instanceof SchematicMessage) {
             SchematicMessage schem = (SchematicMessage) msg;
             height += Scl.scl(SCHEMATIC_CARD_HEIGHT);
@@ -112,7 +126,11 @@ public final class ChatMessageHeightCalculator {
                 height += measureTextHeight(schem.getSuffixText(), availableTextWidth, FONT_SCALE);
             }
         } else if (msg instanceof ImageMessage) {
+            ImageMessage img = (ImageMessage) msg;
             height += Scl.scl(IMAGE_CARD_HEIGHT);
+            if (img.getImageUrl() != null && !img.getImageUrl().isEmpty()) {
+                height += measureTextHeight(img.getImageUrl(), availableTextWidth, 0.85f) + Scl.scl(UNIT_1);
+            }
         } else if (msg instanceof RoomInviteMessage) {
             height += Scl.scl(INVITE_CARD_HEIGHT);
         } else if (msg instanceof MindustryToolLinkMessage) {
@@ -125,9 +143,6 @@ public final class ChatMessageHeightCalculator {
         return height;
     }
 
-    /**
-     * Measures the height of wrapped text using Arc's {@link GlyphLayout}.
-     */
     public static float measureTextHeight(@Nullable String text, float wrapWidth, float fontScale) {
         Font font = null;
         try {
@@ -151,7 +166,7 @@ public final class ChatMessageHeightCalculator {
 
                 layout.setText(font, text, Color.white, wrapWidth, Align.left, true);
                 float h = layout.height;
-                // Match Arc's Label.getPrefHeight() which accounts for line descent spacing (-2 * descent)
+
                 float descentCorrection = -font.getDescent() * 2f;
 
                 font.getData().setScale(oldScaleX, oldScaleY);
@@ -161,7 +176,6 @@ public final class ChatMessageHeightCalculator {
             }
         }
 
-        // Fallback for headless tests where Fonts.def is not initialized
         float charsPerLine = Math.max(10f, wrapWidth / (9f * fontScale * Scl.scl()));
         int estimatedLines = (int) Math.ceil(text.length() / charsPerLine);
         return Math.max(Scl.scl(18f) * fontScale, estimatedLines * (Scl.scl(20f) * fontScale));
@@ -169,5 +183,9 @@ public final class ChatMessageHeightCalculator {
 
     public static void clearCache() {
         HEIGHT_CACHE.clear();
+    }
+
+    static int cacheSize() {
+        return HEIGHT_CACHE.size();
     }
 }

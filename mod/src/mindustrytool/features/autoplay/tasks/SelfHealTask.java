@@ -11,6 +11,7 @@ import mindustry.gen.Building;
 import mindustry.gen.Icon;
 import mindustry.gen.Unit;
 import mindustry.world.meta.BlockFlag;
+import mindustrytool.components.FileIcon;
 import mindustrytool.components.WebStyles;
 import mindustrytool.features.autoplay.AutoplayFeature;
 import solim.config.ConfigValue;
@@ -42,7 +43,7 @@ public class SelfHealTask implements AutoplayTask {
 
     @Override
     public TextureRegionDrawable getIcon() {
-        return Icon.refresh;
+        return FileIcon.of("heart.png", Icon.refresh);
     }
 
     @Override
@@ -94,9 +95,9 @@ public class SelfHealTask implements AutoplayTask {
         Readable<String> thresholdLabel = healThreshold.signal().map(val ->
                 Core.bundle.format("feature.autoplay.settings.self-heal.threshold", Math.round((val != null ? val : 0.6f) * 100)));
 
-        column().growX().gap(unit(1)).children(() -> {
-            text(thresholdLabel).growX().left().color(WebStyles.Colors.GHOST_FG);
-            slider(healThreshold.signal(), 0.2f, 0.8f, 0.05f).growX();
+        column().props(growX(), gap(unit(1))).children(() -> {
+            text(thresholdLabel).props(color(WebStyles.Colors.GHOST_FG), growX(), left());
+            slider(healThreshold.signal(), 0.2f, 0.8f, 0.05f).props(growX());
         });
     }
 

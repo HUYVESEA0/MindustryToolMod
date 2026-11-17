@@ -4,6 +4,7 @@ import arc.util.Nullable;
 import mindustrytool.features.chat.ChatMessageParser;
 import mindustrytool.services.auth.MindustryAuthProvider;
 import solim.reactive.Computed;
+import solim.reactive.Effect;
 import solim.reactive.Readable;
 import solim.reactive.Signal;
 
@@ -14,7 +15,7 @@ public final class ChatSession {
     public static final String PLAYER_CONNECT_PREFIX = "player-connect: ";
     public static final String CAMPAIGN_PREFIX = "campaign: ";
     public static final String EDITOR_STATE = "editing: ";
-    public static final String CUSTOM_GAME_STATE = "custom-game";
+    public static final String CUSTOM_GAME_STATE = "custom-game: ";
 
     private final Computed<Boolean> loggedIn = new Computed<>(() ->
             MindustryAuthProvider.getInstance().session().get() != null);
@@ -25,7 +26,7 @@ public final class ChatSession {
             .map(session -> session != null ? session.getName() : null);
 
     public ChatSession() {
-        username.subscribe(name -> ChatMessageParser.clearCache());
+        Effect.of(username, name -> ChatMessageParser.clearCache());
         username.peek();
     }
 

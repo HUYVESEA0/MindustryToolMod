@@ -9,44 +9,36 @@ import arc.net.NetListener;
 import arc.net.TcpConnection;
 import arc.net.UdpConnection;
 import arc.util.Log;
+import arc.util.Nullable;
 import arc.util.Reflect;
 import arc.util.Threads;
 import arc.util.Time;
 import java.lang.reflect.Field;
-import java.util.HashMap;
+import java.net.InetSocketAddress;
+import java.net.Socket;
 import java.util.concurrent.ExecutorService;
 import mindustry.Vars;
 import mindustry.net.Net.NetProvider;
 
 public class PlayerConnectClient {
 
-    private static final ExecutorService PING_WORKER = Threads.unboundedExecutor("PlayerConnect-Pinger", 1);
-    private static Client pinger;
-    private static Thread pingerThread;
+    public static final int PING_TIMEOUT = 8000;
 
-    @SuppressWarnings("unchecked")
-    public static String getSavedPassword(String roomId) {
-        try {
-            HashMap<String, String> saved = Core.settings.getJson("player-connect.saved-password", HashMap.class,
-                    String.class, HashMap::new);
+    private static @Nullable ExecutorService pingWorker;
 
-            return saved.getOrDefault(roomId, "");
-        } catch (Exception e) {
-            Log.err(e);
-            return "";
+    private static synchronized ExecutorService getPingWorker() {
+        if (pingWorker == null || pingWorker.isShutdown()) {
+            pingWorker = Threads.unboundedExecutor("PlayerConnect-Pinger", 4);
         }
+        return pingWorker;
     }
 
-    @SuppressWarnings("unchecked")
+    public static String getSavedPassword(String roomId) {
+        return Core.settings.getString("player-connect.pwd-" + roomId, "");
+    }
+
     public static void savedPassword(String roomId, String password) {
-        try {
-            HashMap<String, String> saved = Core.settings.getJson("player-connect.saved-password", HashMap.class,
-                    String.class, HashMap::new);
-            saved.put(roomId, password);
-            Core.settings.put("player-connect.saved-password", saved);
-        } catch (Exception e) {
-            Log.err(e);
-        }
+        Core.settings.put("player-connect.pwd-" + roomId, password);
     }
 
     public static void join(PlayerConnectLink link, String password, Runnable success) {
@@ -165,46 +157,27 @@ public class PlayerConnectClient {
     }
 
     public static void pingHost(String ip, int port, Cons<Long> success, Cons<Throwable> onFailed) {
-        PING_WORKER.submit(() -> {
-            try {
-                if (pinger == null || pingerThread == null || !pingerThread.isAlive()) {
-                    pinger = new Client(8192, 8192, new NetworkProxy.Serializer());
-                    pingerThread = Threads.daemon("PlayerConnectPingerThread", pinger);
-                }
-
-                synchronized (pingerThread) {
-                    long start = Time.millis();
-                    pinger.connect(10000, ip, port);
-                    long elapsed = Time.timeSinceMillis(start);
-                    pinger.close();
-                    Core.app.post(() -> success.get(elapsed));
-                }
+        getPingWorker().submit(() -> {
+            try (Socket socket = new Socket()) {
+                long start = Time.millis();
+                socket.connect(new InetSocketAddress(ip, port), PING_TIMEOUT);
+                long elapsed = Time.timeSinceMillis(start);
+                Core.app.post(() -> success.get(elapsed));
             } catch (Exception e) {
                 Core.app.post(() -> onFailed.get(e));
             }
         });
     }
 
-    public static void disposePinger() {
-        if (pinger != null) {
-            pinger.stop();
-            try {
-                if (pingerThread != null) {
-                    pingerThread.join(500);
-                }
-            } catch (Exception ignored) {
-            }
-            try {
-                pinger.dispose();
-            } catch (Exception ignored) {
-            }
-            pingerThread = null;
-            pinger = null;
+    public static synchronized void disposePinger() {
+        if (pingWorker != null) {
+            pingWorker.shutdownNow();
+            pingWorker = null;
         }
     }
 
     public static void unbanProxyIp(NetworkProxy proxy) {
-        PING_WORKER.submit(() -> {
+        getPingWorker().submit(() -> {
             try {
                 String ip = proxy.getProviderIp();
                 if (ip == null || ip.isEmpty()) {

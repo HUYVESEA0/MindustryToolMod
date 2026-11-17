@@ -8,10 +8,6 @@ import mindustry.content.StatusEffects;
 import mindustry.game.SpawnGroup;
 import mindustry.type.UnitType;
 
-/**
- * Computes upcoming-wave unit compositions matching legacy parity with domain grouping and sorting,
- * scaled by the number of matching map spawn points.
- */
 public final class WavePreviewCalculator {
 
     @FunctionalInterface
@@ -19,7 +15,8 @@ public final class WavePreviewCalculator {
         int count(SpawnGroup group);
     }
 
-    private WavePreviewCalculator() {}
+    private WavePreviewCalculator() {
+    }
 
     public static WaveSectionData computeWave(
             int waveNumber,
@@ -66,9 +63,12 @@ public final class WavePreviewCalculator {
         Seq<WaveUnitEntry> ground = new Seq<>();
         Seq<WaveUnitEntry> air = new Seq<>();
         Seq<WaveUnitEntry> naval = new Seq<>();
+        float totalHealth = 0f;
 
         for (UnitType type : counts.keys()) {
-            WaveUnitEntry entry = new WaveUnitEntry(type, counts.get(type));
+            int amount = counts.get(type);
+            WaveUnitEntry entry = new WaveUnitEntry(type, amount);
+            totalHealth += type.health * amount;
             UnitDomain domain = UnitDomain.of(type);
             switch (domain) {
                 case AIR:
@@ -88,6 +88,6 @@ public final class WavePreviewCalculator {
         air.sort(e -> e.type.health);
         naval.sort(e -> e.type.health);
 
-        return new WaveSectionData(waveNumber, ground, air, naval);
+        return new WaveSectionData(waveNumber, ground, air, naval, totalHealth);
     }
 }

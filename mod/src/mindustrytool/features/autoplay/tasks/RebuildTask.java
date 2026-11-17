@@ -18,6 +18,7 @@ import mindustry.gen.Player;
 import mindustry.gen.Unit;
 import mindustry.type.ItemStack;
 import mindustry.world.Build;
+import mindustrytool.components.FileIcon;
 import solim.reactive.Readable;
 import solim.reactive.Signal;
 
@@ -63,7 +64,7 @@ public class RebuildTask implements AutoplayTask {
 
     @Override
     public TextureRegionDrawable getIcon() {
-        return Icon.hammer;
+        return FileIcon.of("refresh-cw.png", Icon.hammer);
     }
 
     @Override
@@ -80,7 +81,8 @@ public class RebuildTask implements AutoplayTask {
 
         cleanStalePlans(unit);
 
-        if (unit.buildPlan() != null && isRebuildPlan(unit.buildPlan())) {
+        BuildPlan current = unit.buildPlan();
+        if (current != null && isRebuildPlan(current)) {
             status.set(Core.bundle.get("feature.autoplay.status.rebuilding"));
             return true;
         }
@@ -101,6 +103,7 @@ public class RebuildTask implements AutoplayTask {
         BlockPlan bestPlan = null;
         int bestIndex = -1;
         float minDst = Float.MAX_VALUE;
+        int affordable = 0;
 
         for (int i = 0; i < plans.size; i++) {
             BlockPlan plan = plans.get(i);
@@ -109,6 +112,10 @@ public class RebuildTask implements AutoplayTask {
             }
 
             if (canAffordPlan(core, plan)) {
+                affordable++;
+                if (!Build.validPlace(plan.block, unit.team, plan.x, plan.y, plan.rotation)) {
+                    continue;
+                }
                 float dst = unit.dst2(plan.x * Vars.tilesize, plan.y * Vars.tilesize);
                 if (dst < minDst) {
                     minDst = dst;
@@ -119,7 +126,9 @@ public class RebuildTask implements AutoplayTask {
         }
 
         if (bestPlan == null) {
-            status.set(Core.bundle.get("feature.autoplay.status.lacking-materials"));
+            boolean blocked = affordable > 0;
+            status.set(Core.bundle.get(blocked ? "feature.autoplay.status.cannot-place"
+                    : "feature.autoplay.status.lacking-materials"));
             return false;
         }
 

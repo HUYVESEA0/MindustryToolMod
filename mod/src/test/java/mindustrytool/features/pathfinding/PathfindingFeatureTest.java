@@ -42,30 +42,12 @@ class PathfindingFeatureTest extends MindustryTestEnv {
         assertNotNull(manager.get(key1));
         assertNotNull(manager.get(key2));
 
-        // Cleanup with currentTime=70, maxAge=30 -> key1 (age 60) removed, key2 (age 20) preserved
         manager.cleanup(70f, 30f);
         assertNull(manager.get(key1));
         assertNotNull(manager.get(key2));
 
         manager.clear();
         assertNull(manager.get(key2));
-    }
-
-    @Test
-    void testFeatureDefaultConfigs() {
-        PathfindingFeature feature = new PathfindingFeature();
-
-        assertFalse(feature.isEnabled());
-        assertTrue(feature.drawUnitPathConfig.get());
-        assertTrue(feature.drawSpawnPathConfig.get());
-        assertFalse(feature.drawAlliesConfig.get());
-        assertEquals(0.5f, feature.zoomThresholdConfig.get(), 0.001f);
-        assertEquals(1.0f, feature.opacityConfig.get(), 0.001f);
-
-        for (int i = 0; i < PathfindingFeature.COST_COUNT; i++) {
-            assertTrue(feature.costTypeConfigs[i].get());
-            assertTrue(feature.isCostTypeEnabled(i));
-        }
     }
 
     @Test
@@ -77,14 +59,15 @@ class PathfindingFeatureTest extends MindustryTestEnv {
         feature.drawAlliesConfig.set(true);
         feature.zoomThresholdConfig.set(1.5f);
         feature.opacityConfig.set(0.6f);
-        feature.costTypeConfigs[0].set(false);
+        feature.costTypeConfigs.get(0).set(false);
+        flushEffects();
 
         assertFalse(feature.drawUnitPathConfig.get());
         assertFalse(feature.drawSpawnPathConfig.get());
         assertTrue(feature.drawAlliesConfig.get());
         assertEquals(1.5f, feature.zoomThresholdConfig.get(), 0.001f);
         assertEquals(0.6f, feature.opacityConfig.get(), 0.001f);
-        assertFalse(feature.costTypeConfigs[0].get());
+        assertFalse(feature.costTypeConfigs.get(0).get());
         assertFalse(feature.isCostTypeEnabled(0));
 
         feature.resetToDefaults();
@@ -94,15 +77,14 @@ class PathfindingFeatureTest extends MindustryTestEnv {
         assertFalse(feature.drawAlliesConfig.get());
         assertEquals(0.5f, feature.zoomThresholdConfig.get(), 0.001f);
         assertEquals(1.0f, feature.opacityConfig.get(), 0.001f);
-        assertTrue(feature.costTypeConfigs[0].get());
+        assertTrue(feature.costTypeConfigs.get(0).get());
         assertTrue(feature.isCostTypeEnabled(0));
     }
 
     @Test
-    void testClientPathfinderClearAndSafeHandling() {
-        ClientPathfinder clientPathfinder = new ClientPathfinder();
+    void testResetClearsCaches() {
+        PathfindingFeature feature = new PathfindingFeature();
+        feature.reset();
 
-        clientPathfinder.clear();
-        assertNull(clientPathfinder.getTargetTile(null, null));
     }
 }

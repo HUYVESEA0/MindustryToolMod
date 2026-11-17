@@ -47,12 +47,19 @@ public final class Request {
     private final Duration timeout;
     private final AuthProvider authProvider;
     private final Map<String, String> headers;
+    private final RetryStrategy retryStrategy;
 
-    private Request(String baseUrl, Duration timeout, AuthProvider authProvider, Map<String, String> headers) {
+    private Request(String baseUrl, Duration timeout, AuthProvider authProvider, Map<String, String> headers,
+            @Nullable RetryStrategy retryStrategy) {
         this.baseUrl = baseUrl;
         this.timeout = timeout != null ? timeout : DEFAULT_TIMEOUT;
         this.authProvider = authProvider;
         this.headers = headers;
+        this.retryStrategy = retryStrategy != null ? retryStrategy : RetryStrategy.defaultStrategy();
+    }
+
+    public RetryStrategy retryStrategy() {
+        return retryStrategy;
     }
 
     public static Builder builder() {
@@ -64,6 +71,7 @@ public final class Request {
         private Duration timeout;
         private AuthProvider authProvider;
         private final Map<String, String> headers = new LinkedHashMap<>();
+        private RetryStrategy retryStrategy;
 
         public Builder header(String name, String value) {
             headers.put(name, value);
@@ -85,12 +93,20 @@ public final class Request {
             return this;
         }
 
+        public Builder retryStrategy(@Nullable RetryStrategy retryStrategy) {
+            this.retryStrategy = retryStrategy;
+            return this;
+        }
+
+        public Builder noRetry() {
+            this.retryStrategy = RetryStrategy.none();
+            return this;
+        }
+
         public Request build() {
-            return new Request(baseUrl, timeout, authProvider, headers);
+            return new Request(baseUrl, timeout, authProvider, headers, retryStrategy);
         }
     }
-
-    // ─── HTTP verbs ────────────────────────────────────────────────
 
     public RequestBuilder get(String url) {
         return new RequestBuilder(this, "GET", url);
@@ -107,8 +123,6 @@ public final class Request {
     public RequestBuilder delete(String url) {
         return new RequestBuilder(this, "DELETE", url);
     }
-
-    // ─── Response & Handlers ───────────────────────────────────────
 
     public static final class Response<T> {
         private final int statusCode;
@@ -179,8 +193,6 @@ public final class Request {
         }
     }
 
-    // ─── Builder ───────────────────────────────────────────────────
-
     public static final class RequestBuilder {
         private final Request outer;
         private final String method;
@@ -190,6 +202,8 @@ public final class Request {
         private final Map<String, List<String>> queryParams = new LinkedHashMap<>();
         private byte[] bodyBytes;
         private boolean useAuth = true;
+        private @Nullable RetryStrategy retryStrategyOverride;
+        private @Nullable Boolean retryOverride;
 
         private RequestBuilder(Request outer, String method, String url) {
             this.outer = outer;
@@ -207,8 +221,6 @@ public final class Request {
             this.timeoutOverride = timeout;
             return this;
         }
-
-        // ─── Query parameters ──────────────────────────────────────
 
         public RequestBuilder query(String key, String value) {
             if (key == null)
@@ -307,6 +319,20 @@ public final class Request {
             return this;
         }
 
+        public RequestBuilder retryStrategy(@Nullable RetryStrategy retryStrategy) {
+            this.retryStrategyOverride = retryStrategy;
+            return this;
+        }
+
+        public RequestBuilder retry(boolean retry) {
+            this.retryOverride = retry;
+            return this;
+        }
+
+        public RequestBuilder noRetry() {
+            return retry(false);
+        }
+
         public CompletableFuture<Response<String>> sendAsync() {
             return sendAsync(BodyHandlers.ofString());
         }
@@ -316,6 +342,7 @@ public final class Request {
             String effectiveUrl = !queryString.isEmpty() ? url + queryString : url;
             String resolvedUrl = resolveUrl(outer.baseUrl, effectiveUrl);
             Duration effectiveTimeout = timeoutOverride != null ? timeoutOverride : outer.timeout;
+            RetryStrategy effectiveStrategy = resolveRetryStrategy();
 
             if (useAuth && outer.authProvider != null) {
                 return outer.authProvider.refreshIfNeeded().thenCompose(v -> {
@@ -323,22 +350,59 @@ public final class Request {
                     if (token != null && !token.trim().isEmpty()) {
                         this.headers.put("Authorization", "Bearer " + token);
                     }
-                    return executeAsync(resolvedUrl, effectiveTimeout, this.headers, handler);
+                    return executeAsync(resolvedUrl, effectiveTimeout, this.headers, handler, effectiveStrategy);
                 });
             } else {
-                return executeAsync(resolvedUrl, effectiveTimeout, this.headers, handler);
+                return executeAsync(resolvedUrl, effectiveTimeout, this.headers, handler, effectiveStrategy);
             }
         }
 
+        private RetryStrategy resolveRetryStrategy() {
+            if (Boolean.FALSE.equals(retryOverride)) {
+                return RetryStrategy.none();
+            }
+            RetryStrategy base = retryStrategyOverride != null ? retryStrategyOverride : outer.retryStrategy;
+            if (Boolean.TRUE.equals(retryOverride)) {
+                return (base instanceof DefaultRetryStrategy)
+                        ? ((DefaultRetryStrategy) base).withRetryPost(true)
+                        : (attempt, m, failure) -> base.nextRetryDelay(attempt, "GET", failure);
+            }
+            return base != null ? base : RetryStrategy.none();
+        }
+
         private <T> CompletableFuture<Response<T>> executeAsync(
-                String resolvedUrl, Duration effectiveTimeout, Map<String, String> headers, BodyHandler<T> handler) {
+                String resolvedUrl, Duration effectiveTimeout, Map<String, String> headers, BodyHandler<T> handler,
+                RetryStrategy strategy) {
             CompletableFuture<Response<T>> future = new CompletableFuture<>();
             EXECUTOR.execute(() -> {
-                try {
-                    Response<T> resp = executeSync(resolvedUrl, effectiveTimeout, headers, handler);
-                    future.complete(resp);
-                } catch (Throwable t) {
-                    future.completeExceptionally(t);
+                int attempt = 0;
+                while (true) {
+                    try {
+                        Response<T> resp = executeSync(resolvedUrl, effectiveTimeout, headers, handler);
+                        future.complete(resp);
+                        return;
+                    } catch (Throwable t) {
+                        attempt++;
+                        Duration delay = strategy != null ? strategy.nextRetryDelay(attempt, method, t) : null;
+                        if (delay != null) {
+                            long delayMillis = delay.toMillis();
+                            if (delayMillis > 0) {
+                                try {
+                                    Thread.sleep(delayMillis);
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                    future.completeExceptionally(t);
+                                    return;
+                                }
+                            }
+                            int status = (t instanceof HttpException) ? ((HttpException) t).statusCode() : -1;
+                            Log.warn("Request @ @ failed (status: @), retrying attempt @ in @ms...",
+                                    method, resolvedUrl, status, attempt, delayMillis);
+                            continue;
+                        }
+                        future.completeExceptionally(t);
+                        return;
+                    }
                 }
             });
             return future;
@@ -429,7 +493,7 @@ public final class Request {
             if (baseUrl == null || baseUrl.isEmpty()) {
                 return url;
             }
-            // Query or fragment should append directly without extra slash
+
             if (url.startsWith("?") || url.startsWith("#")) {
                 return baseUrl + url;
             }
@@ -444,8 +508,6 @@ public final class Request {
             return baseUrl + url;
         }
     }
-
-    // ─── Helpers ───────────────────────────────────────────────────
 
     public static byte[] readAllBytes(InputStream in) throws IOException {
         if (in == null) {
@@ -465,8 +527,6 @@ public final class Request {
             }
         }
     }
-
-    // ─── Multipart helper (kept for upload) ────────────────────────
 
     public static byte[] buildMultipartFormData(String boundary, String fieldName, String fileName, String contentType,
             byte[] fileBytes) {

@@ -11,9 +11,9 @@ import mindustry.type.StatusEffect;
 import mindustry.type.UnitType;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import solim.test.SolimEnv;
+import solim.test.ArcTestEnv;
 
-class WavePreviewCalculatorTest extends SolimEnv {
+class WavePreviewCalculatorTest extends ArcTestEnv {
 
     private static UnitType groundDagger;
     private static UnitType airFlare;
@@ -143,8 +143,6 @@ class WavePreviewCalculatorTest extends SolimEnv {
 
         Seq<SpawnGroup> spawns = Seq.with(normalGroup, bossGroup);
 
-        // 3 * 1.5 = 4.5 -> normal rounded to 5; boss truncated to 4
-        // With 2 spawners: normal = 5 * 2 = 10; boss = 4 * 2 = 8
         WaveSectionData section = WavePreviewCalculator.computeWave(
                 1,
                 spawns,
@@ -193,5 +191,41 @@ class WavePreviewCalculatorTest extends SolimEnv {
 
         assertFalse(section.isEmpty());
         assertEquals(7, section.ground.first().amount);
+        assertEquals(7 * 150f, section.totalHealth, 0.01f);
+    }
+
+    @Test
+    void testTotalHealthMixedDomains() {
+        SpawnGroup daggers = createGroup(groundDagger, 2, 0, 10, 1, -1);
+        SpawnGroup crawlers = createGroup(weakGround, 6, 0, 10, 1, -1);
+        SpawnGroup flares = createGroup(airFlare, 4, 0, 10, 1, -1);
+        SpawnGroup rissos = createGroup(navalRisso, 1, 0, 10, 1, -1);
+
+        Seq<SpawnGroup> spawns = Seq.with(daggers, crawlers, flares, rissos);
+
+        WaveSectionData section = WavePreviewCalculator.computeWave(
+                1,
+                spawns,
+                false,
+                1f,
+                g -> 1);
+
+        float expectedHealth = (2 * 150f) + (6 * 50f) + (4 * 75f) + (1 * 280f);
+        assertEquals(expectedHealth, section.totalHealth, 0.01f);
+    }
+
+    @Test
+    void testTotalHealthEmptyWave() {
+        Seq<SpawnGroup> spawns = new Seq<>();
+
+        WaveSectionData section = WavePreviewCalculator.computeWave(
+                1,
+                spawns,
+                false,
+                1f,
+                g -> 1);
+
+        assertTrue(section.isEmpty());
+        assertEquals(0f, section.totalHealth, 0.01f);
     }
 }

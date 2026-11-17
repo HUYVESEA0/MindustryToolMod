@@ -22,7 +22,7 @@ public final class MapPositionPicker {
             onStart.run();
         }
 
-        if (Vars.ui != null && Vars.ui.hudfrag != null && Core.bundle != null) {
+        if (Vars.ui != null && Vars.ui.hudfrag != null) {
             Vars.ui.hudfrag.showToast(Core.bundle.get("feature.god-mode.picker.tap-instruction"));
         }
 
@@ -52,9 +52,23 @@ public final class MapPositionPicker {
     }
 
     private static void removeListener(Cons<TapEvent> listener) {
+        Runnable task = new RemoveListenerTask(listener);
         if (Core.app != null) {
-            Core.app.post(() -> Events.remove(TapEvent.class, listener));
+            Core.app.post(task);
         } else {
+            task.run();
+        }
+    }
+
+    static final class RemoveListenerTask implements Runnable {
+        final Cons<TapEvent> listener;
+
+        RemoveListenerTask(Cons<TapEvent> listener) {
+            this.listener = listener;
+        }
+
+        @Override
+        public void run() {
             Events.remove(TapEvent.class, listener);
         }
     }

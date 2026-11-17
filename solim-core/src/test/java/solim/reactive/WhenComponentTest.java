@@ -2,7 +2,11 @@ package solim.reactive;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static solim.modifier.Values.growX;
 
 import org.junit.jupiter.api.Test;
 
@@ -10,16 +14,19 @@ import arc.scene.Element;
 import arc.scene.ui.layout.Cell;
 import arc.scene.ui.layout.CellAccess;
 import arc.scene.ui.layout.Table;
+import arc.util.Align;
 import arc.struct.Seq;
-import solim.core.BaseComponent;
+import solim.core.Component;
+import solim.layout.Card;
 import solim.layout.Column;
 import solim.layout.Row;
+import solim.runtime.AttachmentStack;
 import solim.runtime.SignalDispatcher;
 import solim.test.SolimCoreEnv;
 
 class WhenComponentTest extends SolimCoreEnv {
 
-    static class Probe extends BaseComponent {
+    static class Probe extends Component {
         boolean wasDisposed = false;
 
         @Override
@@ -198,7 +205,7 @@ class WhenComponentTest extends SolimCoreEnv {
                     thenBox[0] = new Probe();
                 })
                 .elseDo(() -> new Probe())
-                .growX();
+                .props(solim.modifier.Values.growX());
         when.element();
         SignalDispatcher.flush();
         assertTrue(when.cellConfig().growX);
@@ -212,7 +219,7 @@ class WhenComponentTest extends SolimCoreEnv {
         Signal<Boolean> cond = Signal.of(true);
         Probe[] thenBox = new Probe[1];
         Probe[] elseBox = new Probe[1];
-        When when = When.of(cond).growX();
+        When when = When.of(cond).props(solim.modifier.Values.growX());
         assertEquals(0, when.container().getChildren().size);
 
         when.thenDo(() -> {
@@ -220,6 +227,7 @@ class WhenComponentTest extends SolimCoreEnv {
         }).elseDo(() -> {
             elseBox[0] = new Probe();
         });
+        when.element();
         assertEquals(1, when.container().getChildren().size);
         assertFalse(thenBox[0].wasDisposed);
 
@@ -429,10 +437,11 @@ class WhenComponentTest extends SolimCoreEnv {
     void perRootCellConfigAppliesToOwnCell() {
         Signal<Boolean> cond = Signal.of(true);
         When when = When.of(cond).thenDo(() -> {
-            new Row().growX();
+            new Row().props(growX());
             new Probe();
         });
         when.element();
+        // Arc's Table.getCells() is declared as Seq<Cell>, with a raw Cell argument that cannot be recovered from that API.
         @SuppressWarnings("rawtypes")
         Seq<Cell> cells = when.container().getCells();
         assertEquals(2, cells.size);
@@ -450,7 +459,7 @@ class WhenComponentTest extends SolimCoreEnv {
                 Row row = new Row();
                 row.cellConfig().prefWidth = Readable.of(100f);
                 row.cellConfig().prefHeight = Readable.of(40f);
-            }).growX();
+            }).props(solim.modifier.Values.growX());
         });
         Table table = col.table();
         table.setSize(400f, 300f);
@@ -468,10 +477,10 @@ class WhenComponentTest extends SolimCoreEnv {
         When[] whenBox = new When[1];
         Column col = new Column().children(() -> {
             whenBox[0] = When.of(cond).thenDo(() -> {
-                Row row = new Row().growX();
+                Row row = new Row().props(growX());
                 row.cellConfig().prefHeight = Readable.of(40f);
                 rowBox[0] = row;
-            }).growX();
+            }).props(solim.modifier.Values.growX());
         });
         Table table = col.table();
         table.setSize(400f, 300f);
@@ -558,5 +567,79 @@ class WhenComponentTest extends SolimCoreEnv {
         assertTrue(when.container().visible);
         assertEquals(1, when.container().getChildren().size);
         when.dispose();
+    }
+
+    @Test
+    void whenInsideColumnAttachesChildToWhenContainerNotParentColumn() {
+        Signal<Boolean> cond = Signal.of(true);
+        Card[] cardHolder = new Card[1];
+        When[] whenHolder = new When[1];
+
+        Column column = new Column();
+        column.children(() -> {
+            When w = When.of(cond)
+                    .thenDo(() -> {
+                        Card card = new Card();
+                        card.name("pc-card");
+                        card.children(() -> {
+
+                        });
+                        cardHolder[0] = card;
+                    });
+            w.name("pc-card-wrapper");
+            AttachmentStack.attachToParent(w.element());
+            whenHolder[0] = w;
+        });
+
+        Element colEl = column.element();
+        Element whenEl = whenHolder[0].element();
+        Element cardEl = cardHolder[0].element();
+
+        assertNotNull(cardEl);
+        assertEquals("pc-card", cardEl.name);
+        assertEquals("pc-card-wrapper", whenEl.name);
+        assertSame(whenEl, cardEl.parent, "Card must be attached to When container");
+        assertNotSame(colEl, cardEl.parent, "Card must NOT be attached to outer column");
+        assertTrue(whenHolder[0].container().getChildren().contains(cardEl, true));
+        assertFalse(((Table) colEl).getChildren().contains(cardEl, true));
+
+        column.dispose();
+    }
+
+    @Test
+    void whenCenterPropagatesAlignmentToParentCellAndChildren() {
+        Signal<Boolean> cond = Signal.of(true);
+        When[] whenHolder = new When[1];
+
+        Column col = new Column().children(() -> {
+            When when = When.of(cond)
+                    .center()
+                    .thenDo(() -> new Probe())
+                    .elseDo(() -> new Probe());
+            AttachmentStack.attachToParent(when.element());
+            whenHolder[0] = when;
+        });
+
+        When when = whenHolder[0];
+        Table colTable = col.table();
+        Cell<?> whenCell = colTable.getCell(when.element());
+        colTable.setSize(200f, 200f);
+        colTable.validate();
+        colTable.layout();
+
+        assertEquals(Align.center, CellAccess.align(whenCell));
+        assertEquals(Align.center, when.container().getAlign());
+        assertEquals(Align.center, CellAccess.align(when.container().getCells().first()));
+
+        cond.set(false);
+        SignalDispatcher.flush();
+        colTable.layout();
+
+        assertEquals(Align.center, CellAccess.align(whenCell));
+        assertEquals(Align.center, when.container().getAlign());
+        assertEquals(Align.center, CellAccess.align(when.container().getCells().first()));
+
+        when.dispose();
+        col.dispose();
     }
 }

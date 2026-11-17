@@ -10,9 +10,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import solim.test.SolimEnv;
+import solim.test.ArcTestEnv;
 
-class MusicTrackImportTest extends SolimEnv {
+class MusicTrackImportTest extends ArcTestEnv {
 
     @Test
     void isReadableReturnsFalseForNull() {
@@ -31,8 +31,7 @@ class MusicTrackImportTest extends SolimEnv {
 
     @Test
     void isReadableReturnsTrueForAndroidSafVirtualFile() {
-        // Simulates an Android SAF anonymous Fi where file().exists() is false,
-        // but read() succeeds via ContentResolver openInputStream.
+
         byte[] content = "fake-mp3-bytes".getBytes();
         Fi androidSafFi = new Fi("/document/audio:12345") {
             @Override
@@ -87,7 +86,7 @@ class MusicTrackImportTest extends SolimEnv {
 
     @Test
     void resolveTrackNameAppendsDefaultExtensionWhenMissing() {
-        // On Android, content URI document IDs often have no file extension
+
         Fi safFiWithoutExt = new Fi("/document/audio:1000000034") {
             @Override
             public String name() {

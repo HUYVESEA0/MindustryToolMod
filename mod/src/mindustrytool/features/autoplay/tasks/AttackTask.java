@@ -10,6 +10,7 @@ import mindustry.gen.Icon;
 import mindustry.gen.Teamc;
 import mindustry.gen.Unit;
 import mindustry.type.Weapon;
+import mindustrytool.components.FileIcon;
 import solim.reactive.Readable;
 import solim.reactive.Signal;
 
@@ -32,7 +33,7 @@ public class AttackTask implements AutoplayTask {
 
     @Override
     public TextureRegionDrawable getIcon() {
-        return Icon.warning;
+        return FileIcon.of("swords.png", Icon.warning);
     }
 
     @Override
@@ -82,7 +83,19 @@ public class AttackTask implements AutoplayTask {
             if (unit == null) {
                 return;
             }
-            if (target == null || !target.isAdded() || (target instanceof Healthc && ((Healthc) target).dead())) {
+            if (target == null) {
+                target = null;
+                unit.isShooting(false);
+                return;
+            }
+            if (target instanceof Building) {
+                Building building = (Building) target;
+                if (!building.isValid() || building.dead()) {
+                    target = null;
+                    unit.isShooting(false);
+                    return;
+                }
+            } else if (!target.isAdded() || (target instanceof Healthc && ((Healthc) target).dead())) {
                 target = null;
                 unit.isShooting(false);
                 return;

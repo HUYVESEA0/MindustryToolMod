@@ -15,12 +15,15 @@ import mindustrytool.components.FileIcon;
 import mindustrytool.features.Feature;
 import mindustrytool.features.FeatureManager;
 import mindustrytool.features.FeatureMetadata;
+import mindustrytool.ui.dock.DockPositionConfig;
+import mindustrytool.ui.dock.MindustryDockRegistry;
 import solim.config.ConfigGroup;
 import solim.config.ConfigValue;
 import solim.config.ContextualConfigValue;
 import solim.config.OrderedSeqPersister;
 
 import solim.overlay.SolimDialog;
+import solim.reactive.Effect;
 import solim.reactive.Readable;
 import solim.reactive.Signal;
 import solim.reactive.Signals;
@@ -35,6 +38,8 @@ public class QuickAccessFeature extends Feature {
     public final ConfigValue<Set<String>> hiddenFeaturesConfig;
     public final ConfigValue<Set<String>> shownFeaturesConfig;
     public final ConfigValue<Boolean> hideDragHandleConfig;
+    public final ConfigValue<Boolean> collapsibleConfig;
+    public final ConfigValue<Boolean> collapsedConfig;
     public final ConfigValue<Seq<String>> displayOrderConfig;
 
     public final ContextualConfigValue<Float, Boolean> xConfig;
@@ -42,6 +47,7 @@ public class QuickAccessFeature extends Feature {
 
     public final Signal<Float> xSignal;
     public final Signal<Float> ySignal;
+    public final DockPositionConfig dockPosition;
 
     private @Nullable QuickAccessHudView hudView;
     private @Nullable QuickAccessSettingsDialog settingsDialog;
@@ -63,6 +69,8 @@ public class QuickAccessFeature extends Feature {
         hiddenFeaturesConfig = config.setValue("hidden", String.class, Collections.emptySet());
         shownFeaturesConfig = config.setValue("shown", String.class, Collections.emptySet());
         hideDragHandleConfig = config.boolValue("hideDragHandle", false);
+        collapsibleConfig = config.boolValue("collapsible", false);
+        collapsedConfig = config.boolValue("collapsed", false);
         displayOrderConfig = config.value("display-order", Seq.with(), new OrderedSeqPersister());
 
         xConfig = config.floatValueKeyed(
@@ -101,8 +109,9 @@ public class QuickAccessFeature extends Feature {
 
         xSignal = xConfig.signal();
         ySignal = yConfig.signal();
+        dockPosition = new DockPositionConfig(config, xConfig, yConfig);
 
-        Signals.isPortrait().subscribe(p -> {
+        Effect.of(Signals.isPortrait(), p -> {
             if (hudView != null) {
                 Core.app.post(hudView::keepInScreen);
             }
@@ -131,6 +140,30 @@ public class QuickAccessFeature extends Feature {
         if (hudView != null) {
             Core.app.post(hudView::keepInScreen);
         }
+    }
+
+    public boolean isCollapsible() {
+        return Boolean.TRUE.equals(collapsibleConfig.get());
+    }
+
+    public void setCollapsible(boolean collapsible) {
+        collapsibleConfig.set(collapsible);
+    }
+
+    public boolean isCollapsed() {
+        return Boolean.TRUE.equals(collapsedConfig.get());
+    }
+
+    public void setCollapsed(boolean collapsed) {
+        collapsedConfig.set(collapsed);
+    }
+
+    public void toggleCollapsed() {
+        if (!Boolean.TRUE.equals(collapsibleConfig.get())) {
+            collapsedConfig.set(false);
+            return;
+        }
+        collapsedConfig.set(!Boolean.TRUE.equals(collapsedConfig.get()));
     }
 
     public boolean isFeatureVisible(String id) {
@@ -312,8 +345,7 @@ public class QuickAccessFeature extends Feature {
         Core.settings.put("mindustrytool.quick-access.y.portrait", cy);
         Core.settings.put("mindustrytool.quick-access.y.landscape", cy);
 
-        xConfig.reset();
-        yConfig.reset();
+        dockPosition.resetTo(cx, cy);
 
         if (hudView != null) {
             Core.app.post(hudView::keepInScreen);
@@ -334,6 +366,7 @@ public class QuickAccessFeature extends Feature {
             el.name = "quick-access-hud";
             el.visible(() -> Vars.ui.hudfrag != null && Vars.ui.hudfrag.shown && Vars.state != null
                     && Vars.state.isGame());
+            MindustryDockRegistry.get().registerHud("quick-access", el);
 
             Core.app.post(() -> {
                 if (hudView != null && Vars.ui.hudGroup != null) {
@@ -348,6 +381,7 @@ public class QuickAccessFeature extends Feature {
         if (hudView != null) {
             QuickAccessHudView view = hudView;
             hudView = null;
+            MindustryDockRegistry.get().unregisterHud("quick-access");
             Core.app.post(() -> {
                 view.element().remove();
                 view.dispose();

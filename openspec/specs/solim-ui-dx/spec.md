@@ -33,21 +33,25 @@ UI facade methods that accept reactive content SHALL declare a single `Readable<
 
 ### Requirement: Button fluent content composition
 
-`Button` SHALL provide fluent content methods `text(String)`, `text(Readable<String>)`, `icon(Drawable)`, and `icon(Readable<Drawable>)` that append the corresponding child content to the button. `icon(...)` SHALL apply the standard Solim icon treatment: scalable drawable, `Scaling.fit`, and `unit(6)` sizing. Content SHALL append in call order, and reactive content bindings SHALL be owned by and disposed with the button.
+`Button` SHALL provide fluent content methods `text(String)`, `text(Readable<String>)`, `icon(Drawable)`, and `icon(Readable<Drawable>)` that append the corresponding child content to the button. `icon(...)` SHALL apply the standard Solim icon treatment: scalable drawable, `Scaling.fit`, and `unit(6)` sizing. Content SHALL append in call order, and reactive content bindings SHALL be owned by and disposed with the button. These methods SHALL be retained as content: they are distinguished from the removed content-shaped setters, such as `Text.text(String)`, which set a value rather than append a child.
 
 #### Scenario: Fluent text button
+
 - **WHEN** `button().text("Save").onClick(this::save)` is declared
 - **THEN** the button contains a text label and invokes `save()` on click
 
 #### Scenario: Fluent icon button
-- **WHEN** `button().style(WebStyles.ghost()).size(unit(11)).icon(Icon.add).onClick(r)` is declared
-- **THEN** the button contains an icon child sized at `unit(6)` with no `children(() -> ...)` lambda required
+
+- **WHEN** `button().props(style(WebStyles.ghost()), size(unit(11))).icon(Icon.add).onClick(r)` is declared
+- **THEN** the button contains an icon child sized at `unit(6)` with no `children(() -> ...)` lambda required, and its style and size come from `props(...)`
 
 #### Scenario: Reactive icon updates without recreation
+
 - **WHEN** `button().icon(playIcon)` is declared with `Readable<Drawable> playIcon` and the icon value changes
 - **THEN** the button's icon drawable updates in place
 
 #### Scenario: Reactive content disposed with the button
+
 - **WHEN** a button built with `text(readable)` is disposed
 - **THEN** the reactive binding's effect is disposed and no subscription survives
 
@@ -65,11 +69,19 @@ UI facade methods that accept reactive content SHALL declare a single `Readable<
 
 ### Requirement: Keyed collections use fluent configuration with terminal children
 
-`ReactiveGrid`, `ForEach`, and `VirtualList` SHALL follow the pattern **fundamental data on the factory → fluent configuration → terminal `.children(...)`**. The factory SHALL accept only fundamental data (`reactiveGrid(items)`, `forEach(items)`, `virtualList(items, heightProvider)`); static collections SHALL be accepted directly and wrapped internally. `ReactiveGrid` column count SHALL default to 1 with `.columns(int | Readable<Integer>)` overriding. The required item factory SHALL be supplied through a terminal `children(Function<T, Component>)` (and `children(BiFunction<T, GridItemContext, Component>)` on `ReactiveGrid`) that returns `void`, so configuration cannot continue after it. Component generics SHALL collapse from `<T, K>` to `<T>`; the key type SHALL remain internal. Omitting `.key(...)` SHALL default to identity keys with the reconciler's duplicate-key detection as the only guard. Optional configuration methods (`.key(...)`, `.columns(...)`, `.gap(...)`, `.empty(...)`, `.emptyView(...)`, `.overscan(...)`, `.onReachTop(...)`, `.onReachBottom(...)`, cell/table modifiers) SHALL live on the component, return the component, and be order-independent. Post-construction runtime configuration (e.g. `grid.columns(5)` on a retained reference) SHALL remain functional; terminality SHALL be construction-time API guidance only. No builder or config intermediate objects SHALL be introduced, and the fluent form SHALL add no allocations, subscriptions, effects, or reconciliation passes beyond field assignment.
+`ReactiveGrid`, `ForEach`, and `VirtualList` SHALL follow the pattern **fundamental data on the factory → fluent configuration → terminal `.children(...)`**. The factory SHALL accept only fundamental data (`reactiveGrid(items)`, `forEach(items)`, `virtualList(items, heightProvider)`); static collections SHALL be accepted directly and wrapped internally. `ReactiveGrid` column count SHALL default to 1 with `.columns(int | Readable<Integer>)` overriding. The required item factory SHALL be supplied through a terminal `children(Function<T, Component>)` (and `children(BiFunction<T, GridItemContext, Component>)` on `ReactiveGrid`) that returns `void`, so configuration cannot continue after it. Component generics SHALL collapse from `<T, K>` to `<T>`; the key type SHALL remain internal. Omitting `.key(...)` SHALL default to identity keys with the reconciler's duplicate-key detection as the only guard. Optional configuration methods (`.key(...)`, `.columns(...)`, `.gap(...)`, `.empty(...)`, `.emptyView(...)`, `.overscan(...)`, `.onReachTop(...)`, `.onReachBottom(...)`, cell/table modifiers) SHALL live on the component, return the component, and be order-independent. Post-construction runtime configuration (e.g. `grid.columns(5)` on a retained reference) and reactive column count signals passed to `.columns(Readable<Integer>)` SHALL reactively reflow the grid and update `itemWidth` and `GridItemContext.columnCount()`. `ForEach` SHALL reactively track its collection and reconcile items when the collection changes even when `.children(...)` is declared after initial element creation.
 
 #### Scenario: Grid with defaults and fluent configuration
 - **WHEN** `reactiveGrid(feature.trackSignal(type)).key(track -> track.id).children(track -> new MusicTrackCard(feature, track))` is declared
 - **THEN** a single-column reactive grid renders without any `Signal.of(1)` boilerplate and the item factory is the terminal call
+
+#### Scenario: Reactive column count signal reflows grid
+- **WHEN** `reactiveGrid(items).columns(columnCountSignal).children(factory)` is declared using the fluent facade
+- **THEN** the grid subscribes to `columnCountSignal` and reflows into the updated number of columns whenever `columnCountSignal` changes value
+
+#### Scenario: Runtime column configuration reflows grid
+- **WHEN** `grid.columns(newColumns)` is called on a retained `ReactiveGrid` reference after initial build
+- **THEN** the grid updates its column count and reflows its children accordingly
 
 #### Scenario: Terminal children ends the chain at compile time
 - **WHEN** `reactiveGrid(items).children(item -> render(item)).gap(8)` is attempted
@@ -81,11 +93,15 @@ UI facade methods that accept reactive content SHALL declare a single `Readable<
 
 #### Scenario: Context-aware item factory
 - **WHEN** `reactiveGrid(items).columns(cols).children((item, ctx) -> card(item).width(ctx.itemWidth()))` is declared
-- **THEN** the item factory receives the `GridItemContext` and item width updates reactively
+- **THEN** the item factory receives the `GridItemContext` and item width updates reactively when `cols` changes
 
 #### Scenario: Identity key default
 - **WHEN** `forEach(items).children(factory)` is declared without `.key(...)`
 - **THEN** items reconcile by identity (`equals`/`hashCode`) and duplicate keys throw `IllegalArgumentException` from the reconciler
+
+#### Scenario: ForEach updates on reactive collection changes
+- **WHEN** `forEach(itemsSignal).children(factory)` is declared using `solim.UI.forEach` and `itemsSignal` updates
+- **THEN** `ForEach` reconciles and mounts the updated items
 
 #### Scenario: Reference captured before children
 - **WHEN** a caller retains the component (`var list = virtualList(items, heights).key(k); list.children(factory); this.list = list;`)
@@ -134,4 +150,49 @@ The UI facade SHALL NOT expose methods with no call sites that duplicate existin
 #### Scenario: Count badge via mapped Readable
 - **WHEN** a reactive count badge is needed
 - **THEN** it is declared as `badge(count.map(v -> v > 99 ? "99+" : String.valueOf(v)))` and updates reactively
+
+### Requirement: Single props call per component
+A component declaration SHALL NOT chain multiple `.props(...)` calls. All layout, spacing, alignment, sizing, and styling properties for a single component instance SHALL be declared within a single `.props(...)` invocation.
+
+#### Scenario: Chained props consolidated
+- **WHEN** configuring a component with multiple layout modifiers
+- **THEN** all properties are passed as arguments to a single `.props(...)` method call rather than chaining `.props(...)` multiple times
+
+### Requirement: UI effects created within build
+Components that create reactive effects via `Effect.of(...)` SHALL instantiate them inside `build()` (or during an active ownership window) rather than in their constructors, ensuring automatic registration and disposal with the component lifecycle.
+
+#### Scenario: View effect lifecycle
+- **WHEN** a component with reactive state subscriptions is realized via `build()`
+- **THEN** the reactive effect is registered with the component as ambient owner and automatically disposed when the component is disposed
+
+### Requirement: Layout and alignment declared exclusively via props
+
+Configuration on every Solim host — layout, spacing, alignment, sizing, styling, and state/config values — SHALL be declared exclusively through `.props(...)`. Chained configuration methods on component classes (`.gap(...)`, `.top()`, `.bottom()`, `.left()`, `.right()`, `.center()`, `.align(...)`, `.color(...)`, `.style(...)`, `.wrap(...)`, `.fontScale(...)`, `.checked(...)`, `.rounded(...)`, `.border(...)`, `.background(...)`, `.padding(...)`, `.margin(...)`, `.collapsed(...)`, `.autoplay(...)`, `.controls(...)`, `.columns(...)` on `Grid`, and the rest) SHALL be removed. Content (appends a child), behaviour (a callback or an imperative action), structure (`children`/`items`/`tab`/`show`/`hide`), and accessors SHALL remain fluent.
+
+#### Scenario: Gap declared in props
+
+- **WHEN** configuring a container with item spacing
+- **THEN** the spacing is declared as a prop argument `.props(gap(unit(2)))` instead of a chained `.gap(...)` method
+
+#### Scenario: Alignment declared in props
+
+- **WHEN** configuring a container or element with alignment
+- **THEN** alignment is declared as a prop argument `.props(center(), top())` or `.props(align(...))` instead of chained alignment methods
+
+#### Scenario: State and style declared in props
+
+- **WHEN** a host has a state or style value such as `checked`, `collapsed`, `muted`, `progress`, or `style`
+- **THEN** it is declared through `.props(...)` rather than a chained setter
+
+#### Scenario: Content and behaviour remain fluent
+
+- **WHEN** `button().text("Save").onClick(this::save)` is declared
+- **THEN** both calls compile, because they are content and behaviour, not configuration
+
+### Requirement: Layout props re-exported via UI facade
+The public facade `solim.UI` SHALL re-export standard layout and alignment property factories (`gap`, `center`, `top`, `bottom`, `left`, `right`, `align`, `grow`, `growX`, `growY`, `padding`, `paddingX`, `paddingY`) so that client code can declare declarative props without separate static imports from `solim.modifier.Values`.
+
+#### Scenario: Facade static import
+- **WHEN** client code imports `static solim.UI.*`
+- **THEN** layout property factories such as `gap(...)`, `center()`, `top()`, `left()` are directly in scope for use inside `.props(...)`
 

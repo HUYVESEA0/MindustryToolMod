@@ -1,154 +1,322 @@
 package mindustrytool.features.teamresource;
 
+import static solim.UI.*;
+
+import arc.Core;
 import arc.func.Floatp;
 import arc.graphics.Color;
 import arc.graphics.g2d.Draw;
 import arc.graphics.g2d.Font;
 import arc.graphics.g2d.GlyphLayout;
+import arc.math.Mathf;
 import arc.scene.Element;
+import arc.scene.ui.Label;
+import arc.scene.ui.Tooltip;
+import arc.scene.ui.layout.Table;
 import arc.struct.Seq;
-import mindustry.core.UI;
+import arc.util.Nullable;
 import mindustry.gen.Tex;
 import mindustry.graphics.Pal;
 import mindustry.ui.Fonts;
+import mindustry.ui.Styles;
 import mindustry.world.blocks.power.PowerGraph;
-import solim.core.SolimToken;
+import solim.core.SolimElement;
 
-public class SplitBar extends Element {
-    private final Seq<PowerGraph> graphs;
-    private final Mode mode;
-    private final float fontScale;
-    private final Floatp scaleSupplier;
-    private final GlyphLayout layout = new GlyphLayout();
+public class SplitBar extends SolimElement {
+
+    private final Bar bar;
 
     public enum Mode {
         SATISFACTION,
-        STORED
+        STORED,
+        UNIFIED
+    }
+
+    public SplitBar(TeamResourceState state, @Nullable Floatp scaleSupplier) {
+        bar = new Bar(state, scaleSupplier);
+        props(growX());
     }
 
     public SplitBar(Seq<PowerGraph> graphs, Mode mode, float fontScale) {
         this(graphs, mode, () -> fontScale);
     }
 
-    public SplitBar(Seq<PowerGraph> graphs, Mode mode, Floatp scaleSupplier) {
-        this.graphs = graphs;
-        this.mode = mode;
-        this.scaleSupplier = scaleSupplier;
-        this.fontScale = scaleSupplier != null ? scaleSupplier.get() : 1f;
-        SolimToken.setExpanding(this, true);
+    public SplitBar(Seq<PowerGraph> graphs, Mode mode, @Nullable Floatp scaleSupplier) {
+        bar = new Bar(graphs, mode, scaleSupplier);
+        props(growX());
     }
 
     @Override
-    public float getPrefHeight() {
-        return 20f * (scaleSupplier != null ? scaleSupplier.get() : fontScale);
+    protected Element createElement() {
+        return bar;
     }
 
-    @Override
-    public float getPrefWidth() {
-        return 140f;
-    }
+    private static final class Bar extends Element {
 
-    @Override
-    public void draw() {
-        Draw.reset();
+        private final @Nullable TeamResourceState state;
+        private final Seq<PowerGraph> graphs;
+        private final Mode mode;
+        private final float fontScale;
+        private final @Nullable Floatp scaleSupplier;
 
-        Draw.color(Color.black);
-        Tex.whiteui.draw(x, y, width, height);
-
-        if (graphs.isEmpty()) {
-            return;
+        private static final class SegmentCache {
+            String text = "";
+            final GlyphLayout layout = new GlyphLayout();
+            float lastStored = -1f;
+            float lastBalance = Float.NaN;
+            float lastScale = -1f;
         }
 
-        float totalWeight = 0f;
-        for (PowerGraph graph : graphs) {
-            totalWeight += getWeight(graph);
+        private final Seq<SegmentCache> segmentCaches = new Seq<>();
+        private @Nullable String cachedEmptyMsg;
+        private final GlyphLayout emptyLayout = new GlyphLayout();
+        private float lastEmptyScale = -1f;
+        private float updateTimer = 0f;
+
+        Bar(TeamResourceState state, @Nullable Floatp scaleSupplier) {
+            this.state = state;
+            this.graphs = state.getTeamGraphs();
+            this.mode = Mode.UNIFIED;
+            this.scaleSupplier = scaleSupplier;
+            this.fontScale = scaleSupplier != null ? scaleSupplier.get() : 1f;
+            attachTooltip();
         }
 
-        if (totalWeight <= 0.0001f) {
-            return;
+        Bar(Seq<PowerGraph> graphs, Mode mode, @Nullable Floatp scaleSupplier) {
+            this.state = null;
+            this.graphs = graphs;
+            this.mode = mode;
+            this.scaleSupplier = scaleSupplier;
+            this.fontScale = scaleSupplier != null ? scaleSupplier.get() : 1f;
         }
 
-        float currentX = x;
-        Font font = Fonts.outline;
+        private void attachTooltip() {
+            if (state == null) {
+                return;
+            }
+            addListener(new Tooltip(table -> {
+                table.background(Styles.black8).margin(8f);
+                table.left();
 
-        float originalScaleX = font.getScaleX();
-        float originalScaleY = font.getScaleY();
+                Table header = new Table();
+                header.add("Power: ").color(Color.lightGray);
 
-        try {
-            float currentScale = scaleSupplier != null ? scaleSupplier.get() : fontScale;
-            font.getData().setScale(originalScaleX * currentScale * 0.8f, originalScaleY * currentScale * 0.8f);
+                Label storedLabel = new Label("");
+                storedLabel.setColor(Color.white);
+                float[] lastPowerVals = new float[]{-1f, -1f};
+                storedLabel.update(() -> {
+                    float stored = state.getTotalStoredPower();
+                    float cap = state.getTotalPowerCapacity();
+                    if (Float.isNaN(stored) || Float.isInfinite(stored) || stored < 0f) stored = 0f;
+                    if (Float.isNaN(cap) || Float.isInfinite(cap) || cap < 0f) cap = 0f;
+                    if ((long) stored != (long) lastPowerVals[0] || (long) cap != (long) lastPowerVals[1]) {
+                        lastPowerVals[0] = stored;
+                        lastPowerVals[1] = cap;
+                        storedLabel.setText(TeamResourceState.formatCompactAmount((long) stored)
+                                + " / " + TeamResourceState.formatCompactAmount((long) cap));
+                    }
+                });
+                header.add(storedLabel);
 
+                Label balanceLabel = new Label("");
+                float[] lastBalanceVal = new float[]{Float.NaN};
+                balanceLabel.update(() -> {
+                    float balance = state.getTotalPowerBalance();
+                    float secBalance = balance * 60f;
+                    if (Float.isNaN(secBalance) || Float.isInfinite(secBalance)) secBalance = 0f;
+                    if (Math.abs(secBalance - lastBalanceVal[0]) > 0.5f) {
+                        lastBalanceVal[0] = secBalance;
+                        balanceLabel.setText(" (" + (secBalance >= 0f ? "+" : "")
+                                + TeamResourceState.formatCompactAmount((long) secBalance) + "/s)");
+                        balanceLabel.setColor(balance >= 0f ? Pal.heal : Pal.remove);
+                    }
+                });
+                header.add(balanceLabel);
+                table.add(header).left().row();
+
+                HistoryBuffer powerHistory = state.getTotalPowerHistory();
+                table.add(new SparklineWidget(powerHistory, Pal.powerBar)).left().size(160f, 50f).padTop(4f).row();
+            }));
+        }
+
+        @Override
+        public float getPrefHeight() {
+            return 20f * scale();
+        }
+
+        @Override
+        public float getPrefWidth() {
+            return 140f;
+        }
+
+        private float scale() {
+            return scaleSupplier != null ? scaleSupplier.get() : fontScale;
+        }
+
+        @Override
+        public void draw() {
+            Draw.reset();
+
+            Draw.color(Color.black);
+            Tex.whiteui.draw(x, y, width, height);
+
+            float totalWeight = 0f;
+            for (int i = 0; i < graphs.size; i++) {
+                totalWeight += getWeight(graphs.get(i));
+            }
+
+            if (graphs.isEmpty() || totalWeight <= 0.0001f) {
+                Font font = Fonts.outline;
+                float originalScaleX = font.getScaleX();
+                float originalScaleY = font.getScaleY();
+                try {
+                    float currentScale = scale();
+                    font.getData().setScale(originalScaleX * currentScale * 0.70f, originalScaleY * currentScale * 0.70f);
+                    font.setColor(Color.gray);
+                    if (cachedEmptyMsg == null) {
+                        cachedEmptyMsg = Core.bundle != null
+                                ? Core.bundle.get("team-resources.no-power", "No power network")
+                                : "No power network";
+                    }
+                    if (Math.abs(currentScale - lastEmptyScale) > 0.001f) {
+                        emptyLayout.setText(font, cachedEmptyMsg);
+                        lastEmptyScale = currentScale;
+                    }
+                    if (emptyLayout.width < width - 4f) {
+                        font.draw(emptyLayout, x + width / 2f - emptyLayout.width / 2f, y + height / 2f + emptyLayout.height / 2f);
+                    }
+                } finally {
+                    font.getData().setScale(originalScaleX, originalScaleY);
+                }
+                Draw.reset();
+                return;
+            }
+
+            float currentX = x;
+            Font font = Fonts.outline;
+
+            float originalScaleX = font.getScaleX();
+            float originalScaleY = font.getScaleY();
+
+            try {
+                float currentScale = scale();
+                font.getData().setScale(originalScaleX * currentScale * 0.72f, originalScaleY * currentScale * 0.72f);
+
+                updateTimer += Core.graphics != null ? Core.graphics.getDeltaTime() : 0.016f;
+                if (updateTimer >= 0.5f || segmentCaches.size != graphs.size) {
+                    updateTimer = 0f;
+                    updateSegmentCaches(font, currentScale);
+                }
+
+                for (int i = 0; i < graphs.size; i++) {
+                    PowerGraph graph = graphs.get(i);
+                    float weight = getWeight(graph);
+                    if (weight <= 0f) {
+                        continue;
+                    }
+
+                    float rawWidth = width * (weight / totalWeight);
+                    float sectionWidth = (i == graphs.size - 1) ? Math.max(0f, (x + width) - currentX) : Math.min(rawWidth, (x + width) - currentX);
+                    if (sectionWidth <= 0f) {
+                        continue;
+                    }
+
+                    float fraction = getFraction(graph);
+                    if (fraction > 0.001f) {
+                        if (graph.getPowerBalance() < 0f) {
+                            Draw.color(Pal.remove);
+                        } else {
+                            Draw.color(Pal.powerBar);
+                        }
+
+                        float fillWidth = Mathf.clamp(sectionWidth * fraction, 0f, sectionWidth);
+                        if (fillWidth > 0.5f) {
+                            Tex.whiteui.draw(currentX, y, fillWidth, height);
+                        }
+                    }
+
+                    if (i < graphs.size - 1) {
+                        Draw.color(Color.black, 0.7f);
+                        Tex.whiteui.draw(currentX + sectionWidth - 1f, y, 2f, height);
+                    }
+
+                    if (i < segmentCaches.size) {
+                        SegmentCache cache = segmentCaches.get(i);
+                        if (!cache.text.isEmpty() && cache.layout.width < sectionWidth - 6f) {
+                            font.setColor(Color.white);
+                            font.draw(cache.layout, currentX + sectionWidth / 2f - cache.layout.width / 2f,
+                                    y + height / 2f + cache.layout.height / 2f);
+                        }
+                    }
+
+                    currentX += sectionWidth;
+                }
+            } finally {
+                font.getData().setScale(originalScaleX, originalScaleY);
+            }
+
+            Draw.reset();
+        }
+
+        private void updateSegmentCaches(Font font, float currentScale) {
+            while (segmentCaches.size < graphs.size) {
+                segmentCaches.add(new SegmentCache());
+            }
+            while (segmentCaches.size > graphs.size) {
+                segmentCaches.pop();
+            }
             for (int i = 0; i < graphs.size; i++) {
                 PowerGraph graph = graphs.get(i);
-                float weight = getWeight(graph);
-                if (weight <= 0f) {
-                    continue;
+                SegmentCache cache = segmentCaches.get(i);
+                float balance = graph.getPowerBalance();
+                float stored = graph.getLastPowerStored();
+                if (Float.isNaN(balance) || Float.isInfinite(balance)) {
+                    balance = 0f;
+                }
+                if (Float.isNaN(stored) || Float.isInfinite(stored) || stored < 0f) {
+                    stored = 0f;
                 }
 
-                float sectionWidth = width * (weight / totalWeight);
-                float fraction = getFraction(graph);
-
-                if (fraction > 0.01f) {
-                    if (mode == Mode.SATISFACTION && graph.getPowerBalance() < 0f) {
-                        Draw.color(Color.scarlet);
-                    } else {
-                        Draw.color(Pal.powerBar);
-                    }
-
-                    float fillWidth = sectionWidth * fraction;
-                    if (fillWidth > 0.5f) {
-                        Tex.whiteui.draw(currentX, y, fillWidth, height);
-                    }
+                if (Math.abs(balance - cache.lastBalance) > 0.01f || (long) stored != (long) cache.lastStored || Math.abs(currentScale - cache.lastScale) > 0.001f) {
+                    cache.lastBalance = balance;
+                    cache.lastStored = stored;
+                    cache.lastScale = currentScale;
+                    cache.text = buildSectionText(graph, balance, stored);
+                    cache.layout.setText(font, cache.text);
                 }
-
-                if (i < graphs.size - 1) {
-                    Draw.color(Color.black);
-                    Draw.alpha(0.5f);
-                    Tex.whiteui.draw(currentX + sectionWidth - 1f, y, 2f, height);
-                }
-
-                String text = getSectionText(graph);
-                if (!text.isEmpty()) {
-                    layout.setText(font, text);
-
-                    if (layout.width < sectionWidth - 4f) {
-                        font.setColor(Color.white);
-                        font.draw(text, currentX + sectionWidth / 2f - layout.width / 2f,
-                                y + height / 2f + layout.height / 2f);
-                    }
-                }
-
-                currentX += sectionWidth;
             }
-        } finally {
-            font.getData().setScale(originalScaleX, originalScaleY);
         }
 
-        Draw.reset();
-    }
-
-    private float getWeight(PowerGraph graph) {
-        if (mode == Mode.SATISFACTION) {
-            return Math.max(graph.getLastPowerProduced(), graph.getLastPowerNeeded());
-        } else {
-            return graph.getLastCapacity();
+        private float getWeight(PowerGraph graph) {
+            if (mode == Mode.SATISFACTION) {
+                return Math.max(graph.getLastPowerProduced(), graph.getLastPowerNeeded());
+            }
+            float cap = graph.getLastCapacity();
+            if (cap > 0f) {
+                return cap;
+            }
+            return Math.max(1f, Math.max(graph.getLastPowerProduced(), graph.getLastPowerNeeded()));
         }
-    }
 
-    private float getFraction(PowerGraph graph) {
-        if (mode == Mode.SATISFACTION) {
-            return graph.getSatisfaction();
-        } else {
-            return graph.getLastCapacity() <= 0f ? 0f : graph.getLastPowerStored() / graph.getLastCapacity();
+        private float getFraction(PowerGraph graph) {
+            if (mode == Mode.SATISFACTION) {
+                return Mathf.clamp(graph.getSatisfaction());
+            }
+            float cap = graph.getLastCapacity();
+            if (cap > 0f) {
+                return Mathf.clamp(graph.getLastPowerStored() / cap);
+            }
+            return Mathf.clamp(graph.getSatisfaction());
         }
-    }
 
-    private String getSectionText(PowerGraph graph) {
-        if (mode == Mode.SATISFACTION) {
-            float balance = graph.getPowerBalance();
-            return (balance >= 0f ? "+" : "") + UI.formatAmount((long) (balance * 60f));
-        } else {
-            return UI.formatAmount((long) graph.getLastPowerStored());
+        private String buildSectionText(PowerGraph graph, float balance, float stored) {
+            if (mode == Mode.SATISFACTION) {
+                return (balance >= 0f ? "+" : "") + TeamResourceState.formatCompactAmount((long) (balance * 60f));
+            }
+            float balancePerSec = balance * 60f;
+            String storedStr = TeamResourceState.formatCompactAmount((long) stored);
+            String netStr = (balancePerSec >= 0f ? "+" : "") + TeamResourceState.formatCompactAmount((long) balancePerSec);
+            return storedStr + " " + netStr;
         }
     }
 }

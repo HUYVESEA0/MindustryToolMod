@@ -2,113 +2,152 @@ package solim.reactive;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import arc.Application;
 import arc.Core;
 import arc.Events;
+import arc.mock.MockApplication;
 import arc.mock.MockGraphics;
 import solim.test.SolimEnv;
+import java.util.ArrayDeque;
 import java.util.concurrent.atomic.AtomicInteger;
 import mindustry.game.EventType.ResizeEvent;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import solim.runtime.SignalDispatcher;
 
 class SignalsTest extends SolimEnv {
 
-	static class ResizableMockGraphics extends MockGraphics {
-		int width = 1000;
-		int height = 500;
+    static class QueuedApplication extends MockApplication {
+        final ArrayDeque<Runnable> pending = new ArrayDeque<>();
 
-		@Override
-		public int getWidth() {
-			return width;
-		}
+        @Override
+        public void post(Runnable runnable) {
+            pending.addLast(runnable);
+        }
+    }
 
-		@Override
-		public int getHeight() {
-			return height;
-		}
+    static class ResizableMockGraphics extends MockGraphics {
+        int width = 1000;
+        int height = 500;
 
-		@Override
-		public boolean isPortrait() {
-			return height > width;
-		}
-	}
+        @Override
+        public int getWidth() {
+            return width;
+        }
 
-	private static ResizableMockGraphics mockGraphics;
+        @Override
+        public int getHeight() {
+            return height;
+        }
 
-	@BeforeAll
-	static void initCore() {
-		mockGraphics = new ResizableMockGraphics();
-		Core.graphics = mockGraphics;
-		Signals.init();
-	}
+        @Override
+        public boolean isPortrait() {
+            return height > width;
+        }
+    }
 
-	@BeforeEach
-	void resetDimensions() {
-		mockGraphics.width = 1000;
-		mockGraphics.height = 500;
-		Events.fire(new ResizeEvent());
-	}
+    private static ResizableMockGraphics mockGraphics;
 
-	@Test
-	void testInitialStateIsLandscape() {
-		assertFalse(Signals.isPortrait().peek());
-	}
+    @BeforeAll
+    static void initCore() {
+        mockGraphics = new ResizableMockGraphics();
+        Core.graphics = mockGraphics;
+        Signals.init();
+    }
 
-	@Test
-	void testOrientationChangeOnResizeEvent() {
-		// Change dimensions to portrait
-		mockGraphics.width = 500;
-		mockGraphics.height = 1000;
-		Events.fire(new ResizeEvent());
+    @BeforeEach
+    void resetDimensions() {
+        mockGraphics.width = 1000;
+        mockGraphics.height = 500;
+        Events.fire(new ResizeEvent());
+    }
 
-		assertTrue(Signals.isPortrait().peek());
+    @Test
+    void testInitialStateIsLandscape() {
+        assertFalse(Signals.isPortrait().peek());
+    }
 
-		// Change dimensions back to landscape
-		mockGraphics.width = 1200;
-		mockGraphics.height = 800;
-		Events.fire(new ResizeEvent());
+    @Test
+    void testOrientationChangeOnResizeEvent() {
 
-		assertFalse(Signals.isPortrait().peek());
-	}
+        mockGraphics.width = 500;
+        mockGraphics.height = 1000;
+        Events.fire(new ResizeEvent());
 
-	@Test
-	void testDeduplicationWhenOrientationUnchanged() {
-		AtomicInteger fireCount = new AtomicInteger(0);
-		if (Signals.isPortrait() instanceof Signal) {
-			((Signal<Boolean>) Signals.isPortrait()).subscribe(val -> fireCount.incrementAndGet());
-		}
+        assertTrue(Signals.isPortrait().peek());
 
-		// Initial is landscape (false). Fire resize that remains landscape.
-		mockGraphics.width = 1600;
-		mockGraphics.height = 900;
-		Events.fire(new ResizeEvent());
+        mockGraphics.width = 1200;
+        mockGraphics.height = 800;
+        Events.fire(new ResizeEvent());
 
-		assertEquals(0, fireCount.get());
+        assertFalse(Signals.isPortrait().peek());
+    }
 
-		// Switch to portrait
-		mockGraphics.width = 400;
-		mockGraphics.height = 800;
-		Events.fire(new ResizeEvent());
+    @Test
+    void testOrientationUpdatesSynchronouslyDuringResize() {
+        Application previousApp = Core.app;
+        QueuedApplication queuedApp = new QueuedApplication();
+        Core.app = queuedApp;
+        try {
+            mockGraphics.width = 500;
+            mockGraphics.height = 1000;
+            Events.fire(new ResizeEvent());
 
-		assertEquals(1, fireCount.get());
-	}
+            assertTrue(Signals.isPortrait().peek(),
+                    "Orientation must be updated before later ResizeEvent listeners run");
+        } finally {
+            Core.app = previousApp;
+        }
+    }
 
-	@Test
-	void testMultipleSubscribers() {
-		AtomicInteger sub1 = new AtomicInteger(0);
-		AtomicInteger sub2 = new AtomicInteger(0);
+    @Test
+    void testDeduplicationWhenOrientationUnchanged() {
+        AtomicInteger fireCount = new AtomicInteger(0);
+        Effect e = Effect.of(Signals.isPortrait(), val -> fireCount.incrementAndGet());
+        assertEquals(1, fireCount.get());
 
-		if (Signals.isPortrait() instanceof Signal) {
-			((Signal<Boolean>) Signals.isPortrait()).subscribe(val -> sub1.incrementAndGet());
-			((Signal<Boolean>) Signals.isPortrait()).subscribe(val -> sub2.incrementAndGet());
-		}
+        mockGraphics.width = 1600;
+        mockGraphics.height = 900;
+        Events.fire(new ResizeEvent());
+        SignalDispatcher.flush();
 
-		mockGraphics.width = 300;
-		mockGraphics.height = 600;
-		Events.fire(new ResizeEvent());
+        assertEquals(1, fireCount.get());
 
-		assertEquals(1, sub1.get());
-		assertEquals(1, sub2.get());
-	}
+        mockGraphics.width = 400;
+        mockGraphics.height = 800;
+        Events.fire(new ResizeEvent());
+        SignalDispatcher.flush();
+
+        assertEquals(2, fireCount.get());
+        e.dispose();
+    }
+
+    @Test
+    void testMultipleSubscribers() {
+        AtomicInteger sub1 = new AtomicInteger(0);
+        AtomicInteger sub2 = new AtomicInteger(0);
+
+        Effect e1 = Effect.of(Signals.isPortrait(), val -> sub1.incrementAndGet());
+        Effect e2 = Effect.of(Signals.isPortrait(), val -> sub2.incrementAndGet());
+        assertEquals(1, sub1.get());
+        assertEquals(1, sub2.get());
+
+        mockGraphics.width = 300;
+        mockGraphics.height = 600;
+        Events.fire(new ResizeEvent());
+        SignalDispatcher.flush();
+
+        assertEquals(2, sub1.get());
+        assertEquals(2, sub2.get());
+        e1.dispose();
+        e2.dispose();
+    }
+
+    @Test
+    void requestRefreshUpdatesSignalsAfterEventlessTransition() {
+        assertNotNull(Signals.singlePlayer());
+        Signals.requestRefresh();
+        assertNotNull(Signals.netActive().peek());
+    }
 }

@@ -7,6 +7,7 @@ import arc.graphics.Color;
 import arc.math.Mathf;
 import arc.scene.Element;
 import arc.util.Align;
+import arc.util.Nullable;
 import arc.util.Time;
 
 import java.util.ArrayList;
@@ -20,12 +21,12 @@ import mindustrytool.components.FileIcon;
 import mindustrytool.components.WebStyles;
 import mindustrytool.features.playerconnect.PlayerConnectFeature;
 import mindustrytool.models.response.PlayerConnectRoom;
-import solim.core.BaseComponent;
+import solim.core.Units;
 import solim.core.Component;
 import solim.reactive.Computed;
 import solim.reactive.Signal;
 
-public class RoomBrowserView extends BaseComponent {
+public class RoomBrowserView extends Component {
 
     public static class ProviderRoomGroup {
         public final String providerName;
@@ -56,171 +57,160 @@ public class RoomBrowserView extends BaseComponent {
     private final PlayerConnectFeature feature;
     private final Signal<String> searchQuery = Signal.of("");
     private final Signal<Boolean> collapsed = Signal.of(false);
-    private final Computed<Integer> columnCount = dvw(90f).map(w -> Mathf.clamp((int) (w / 550f), 1, 4));
+    private final Computed<Integer> columnCount = Units.dvw.map(w -> Mathf.clamp((int) (w * 0.9f / 550f), 1, 4));
 
     public RoomBrowserView(PlayerConnectFeature feature) {
         this.feature = feature;
     }
 
     private Component roomsLoading() {
-        return column().growX().margin(unit(3)).center().children(() -> {
-            icon(Icon.refresh).size(unit(8));
+        return column().props(growX(), margin(unit(3)), center()).children(() -> {
+            icon(Icon.refresh).props(size(unit(8)), prefWidth(unit(8)), prefHeight(unit(8)));
             text(Core.bundle.get("loading", "Loading..."));
         });
     }
 
-    @Override
-    protected Element build() {
-        Computed<List<PlayerConnectRoom>> filteredRooms = Signal.computed(() -> {
-            List<PlayerConnectRoom> all = feature.getRooms().get();
-            String q = searchQuery.get();
-            if (q == null || q.trim().isEmpty() || all == null) {
-                return all != null ? all : new ArrayList<>();
-            }
-            String queryLower = q.trim().toLowerCase();
-            List<PlayerConnectRoom> result = new ArrayList<>();
-            for (PlayerConnectRoom room : all) {
+    private static List<ProviderRoomGroup> groupRooms(@Nullable List<PlayerConnectRoom> all, @Nullable String query) {
+        if (all == null || all.isEmpty()) {
+            return Collections.emptyList();
+        }
+        String queryLower = (query != null && !query.trim().isEmpty()) ? query.trim().toLowerCase() : null;
+        Map<String, List<PlayerConnectRoom>> map = new LinkedHashMap<>();
+        for (PlayerConnectRoom room : all) {
+            if (queryLower != null) {
                 String name = room.getData() != null && room.getData().getName() != null
                         ? room.getData().getName()
                         : room.getName();
-                if (name != null && name.toLowerCase().contains(queryLower)) {
-                    result.add(room);
+                if (name == null || !name.toLowerCase().contains(queryLower)) {
+                    continue;
                 }
             }
-            return result;
-        });
+            String pName = room.getName() != null && !room.getName().trim().isEmpty()
+                    ? room.getName().trim()
+                    : Core.bundle.get("feature.player-connect.unknown-provider", "Relay Network");
+            List<PlayerConnectRoom> group = map.get(pName);
+            if (group == null) {
+                group = new ArrayList<>();
+                map.put(pName, group);
+            }
+            group.add(room);
+        }
+        if (map.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<ProviderRoomGroup> result = new ArrayList<>();
+        for (Map.Entry<String, List<PlayerConnectRoom>> entry : map.entrySet()) {
+            result.add(new ProviderRoomGroup(entry.getKey(), entry.getValue()));
+        }
+        return result;
+    }
 
-        Computed<List<ProviderRoomGroup>> groupedRooms = Signal.computed(() -> {
-            List<PlayerConnectRoom> list = filteredRooms.get();
-            if (list == null || list.isEmpty()) {
-                return Collections.emptyList();
-            }
-            Map<String, List<PlayerConnectRoom>> map = new LinkedHashMap<>();
-            for (PlayerConnectRoom room : list) {
-                String pName = room.getName() != null && !room.getName().trim().isEmpty()
-                        ? room.getName().trim()
-                        : Core.bundle.get("feature.player-connect.unknown-provider", "Relay Network");
-                List<PlayerConnectRoom> group = map.get(pName);
-                if (group == null) {
-                    group = new ArrayList<>();
-                    map.put(pName, group);
-                }
-                group.add(room);
-            }
-            List<ProviderRoomGroup> result = new ArrayList<>();
-            for (Map.Entry<String, List<PlayerConnectRoom>> entry : map.entrySet()) {
-                result.add(new ProviderRoomGroup(entry.getKey(), entry.getValue()));
-            }
-            return result;
-        });
-
+    @Override
+    protected Element build() {
         return column()
-                .growX()
-                .margin(unit(2))
-                .gap(unit(2))
-                .left()
+                .props(growX(), margin(unit(2)), gap(unit(2)), left())
                 .children(() -> {
-                    // Header Bar
-                    row().growX().gap(unit(2)).center().children(() -> {
+
+                    row().props(growX(), gap(unit(2)), center()).children(() -> {
                         button(() -> collapsed.set(!Boolean.TRUE.equals(collapsed.get())))
-                                .style(WebStyles.outline())
-                                .size(unit(11))
+                                .props(style(WebStyles.outline()), size(unit(11)), prefWidth(unit(11)), prefHeight(unit(11)))
                                 .children(() -> icon(
                                         collapsed.map(c -> Boolean.TRUE.equals(c)
                                                 ? FileIcon.of("chevron-right.png", Icon.rightOpen)
                                                 : FileIcon.of("chevron-down.png", Icon.downOpen)))
-                                                        .width(unit(6)));
+                                        .props(width(unit(6)), prefWidth(unit(6))));
 
-                        // Search field
-                        row().growX().height(unit(11)).border(1.5f, Color.darkGray).paddingX(unit(2)).rounded(unit(2))
+                        row().props(growX(), height(unit(11)), prefHeight(unit(11)), border(1.5f, Color.darkGray), paddingX(unit(2)), rounded(unit(2)))
                                 .children(() -> {
                                     textField(searchQuery)
-                                            .grow()
-                                            .style(WebStyles.clearInput());
+                                            .props(style(WebStyles.clearInput()), grow());
 
                                 });
-                        // Refresh button
+
                         button(feature.getRoomsQuery()::refetch)
-                                .style(WebStyles.outline())
-                                .size(unit(11))
-                                .children(() -> icon(Icon.refresh).origin(Align.center).size(unit(7))
-                                        .update((element) -> {
+                                .props(style(WebStyles.outline()), size(unit(11)), prefWidth(unit(11)), prefHeight(unit(11)))
+                                .children(() -> icon(Icon.refresh).props(size(unit(6)), prefWidth(unit(6)), prefHeight(unit(6)), update((element) -> {
+                                            element.setOrigin(Align.center);
+
                                             if (feature.isFetching().peek()) {
-                                                element.rotation -= 5 * Time.delta;
+                                                element.rotation -= 6f * Time.delta;
+                                                if (element.rotation <= -360f) {
+                                                    element.rotation += 360f;
+                                                }
                                                 return;
                                             }
 
-                                            if (element.rotation != 0) {
-                                                float last = element.rotation;
-                                                element.rotation %= 360;
-                                                element.rotation -= 5 * Time.delta;
-
-                                                if (last < element.rotation) {
-                                                    element.rotation = 0;
+                                            if (element.rotation < 0f) {
+                                                element.rotation -= 6f * Time.delta;
+                                                if (element.rotation <= -360f) {
+                                                    element.rotation = 0f;
                                                 }
                                             }
-                                        }));
+                                        })));
 
-                        // Join via Link button
                         button(Core.bundle.get("feature.player-connect.join-link-title", "Join via Link"), () -> {
-                            new JoinRoomDialog().show();
+                            feature.getJoinRoomDialog().show();
                         })
-                                .style(WebStyles.outline())
-                                .height(unit(11))
-                                .paddingX(unit(3));
+                                .props(style(WebStyles.outline()), height(unit(11)), prefHeight(unit(11)), paddingX(unit(3)));
                     });
 
                     divider();
 
-                    // Collapsible room list
                     when(collapsed)
                             .thenDo(() -> row())
-                            .elseDo(() -> column().growX().children(() -> {
-                            query(feature.getRoomsQuery())
-                                    .grow()
-                                    .loading(this::roomsLoading)
-                                    .error(err -> column().growX().margin(unit(3)).center().children(() -> {
-                                        text(err != null ? err.getMessage() : Core.bundle.get("error", "Error"))
-                                                .color(Color.scarlet);
-                                        button(Core.bundle.get("retry", "Retry"), feature.getRoomsQuery()::refetch)
-                                                .style(WebStyles.outline())
-                                                .height(unit(10));
-                                    }))
-                                    .data((allRooms, fetching) -> Boolean.TRUE.equals(fetching)
-                                            ? roomsLoading()
-                                            : column().growX().children(() -> {
-                                                dynamic(groupedRooms, groups -> {
-                                                    if (groups == null || groups.isEmpty()) {
-                                                        column().growX().margin(unit(3)).center()
-                                                                .children(() -> {
-                                                                    text(Core.bundle.get(
-                                                                            "feature.player-connect.no-rooms",
-                                                                            "No active PlayerConnect rooms found."))
-                                                                                     .color(Color.lightGray);
-                                                                                 });
+                            .elseDo(() -> column().props(growX()).children(() -> {
+                                query(feature.getRoomsQuery())
+                                        .props(grow())
+                                        .loading(this::roomsLoading)
+                                        .error(err -> column().props(growX(), margin(unit(3)), center()).children(() -> {
+                                            text(err != null ? err.getMessage() : Core.bundle.get("error", "Error"))
+                                                    .props(color(Color.scarlet));
+                                            button(Core.bundle.get("retry", "Retry"), feature.getRoomsQuery()::refetch)
+                                                    .props(style(WebStyles.outline()), height(unit(10)), prefHeight(unit(10)));
+                                        }))
+                                        .data((allRooms, fetching) -> Boolean.TRUE.equals(fetching)
+                                                ? roomsLoading()
+                                                : column().props(growX()).children(() -> {
+                                                    Computed<List<ProviderRoomGroup>> groupedRooms = searchQuery
+                                                            .map(q -> groupRooms(allRooms, q));
+                                                    dynamic(groupedRooms, groups -> {
+                                                        if (groups == null || groups.isEmpty()) {
+                                                            column().props(growX(), margin(unit(3)), center())
+                                                                    .children(() -> {
+                                                                        text(Core.bundle.get(
+                                                                                "feature.player-connect.no-rooms",
+                                                                                "No active PlayerConnect rooms found."))
+                                                                                .props(color(Color.lightGray));
+                                                                    });
 
-                                                    } else {
-                                                        column().growX().gap(unit(3.5f)).children(() -> {
-                                                        for (ProviderRoomGroup group : groups) {
-                                                            column().growX().gap(unit(2)).left().children(() -> {
-                                                                // Provider group header
-                                                                row().growX().gap(unit(2)).children(() -> {
-                                                                    text(group.providerName).left();
-                                                                    text("(" + group.rooms.size() + ")");
-                                                                });
+                                                        } else {
+                                                            column().props(growX(), gap(unit(3.5f))).children(() -> {
+                                                                for (ProviderRoomGroup group : groups) {
+                                                                    column().props(growX(), gap(unit(2)), left())
+                                                                            .children(() -> {
 
-                                                                // Grid of rooms for this provider
-                                                                reactiveGrid(group.rooms).columns(columnCount)
-                                                                        .key(PlayerConnectRoom::getLink).gap(unit(2))
-                                                                        .children((PlayerConnectRoom r) -> new RoomCard(r));
+                                                                                row().props(growX(), gap(unit(2)))
+                                                                                        .children(() -> {
+                                                                                            text(group.providerName).props(left());
+                                                                                            text("(" + group.rooms
+                                                                                                    .size() + ")");
+                                                                                        });
+
+                                                                                reactiveGrid(group.rooms)
+                                                                                        .props(gap(unit(2)))
+                                                                                        .columns(columnCount)
+                                                                                        .key(PlayerConnectRoom::getLink)
+                                                                                        .items((
+                                                                                                PlayerConnectRoom r) -> new RoomCard(
+                                                                                                        r));
+                                                                            });
+                                                                }
                                                             });
-                                                        }
-                                                    });
 
-                                                    }
-                                                }).growX();
-                                            }));
-                        })).growX();
+                                                        }
+                                                    }).props(growX());
+                                                }));
+                            })).props(growX());
 
                     divider();
                 }).element();

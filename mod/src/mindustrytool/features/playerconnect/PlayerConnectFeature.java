@@ -19,6 +19,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.CompletableFuture;
 import mindustry.Vars;
@@ -50,6 +51,7 @@ import mindustrytool.features.playerconnect.net.Packets.RoomCloseReason;
 import mindustrytool.features.playerconnect.ui.HostRoomDialog;
 import mindustrytool.features.playerconnect.ui.JoinApprovalHudView;
 import mindustrytool.features.playerconnect.ui.JoinDialogInjector;
+import mindustrytool.features.playerconnect.ui.JoinRoomDialog;
 import mindustrytool.features.playerconnect.ui.ManageRoomDialog;
 import mindustrytool.models.response.PlayerConnectProvider;
 import mindustrytool.models.response.PlayerConnectRoom;
@@ -78,12 +80,10 @@ public class PlayerConnectFeature extends Feature {
 
     private final Signal<HostingState> state = Signal.of(HostingState.IDLE);
     private final Signal<Integer> ping = Signal.of(0);
-    private final Query<List<PlayerConnectRoom>> roomsQuery = Query.<List<PlayerConnectRoom>>builder()
-            .key(QueryKey.of("playerconnect", "rooms"))
-            .fetch(() -> MindustryTool.getPlayerConnectRooms(""))
-            .staleTime(Duration.ofSeconds(15))
-            .build();
-            
+    private final Query<List<PlayerConnectRoom>> roomsQuery;
+    private final Readable<List<PlayerConnectRoom>> rooms;
+    private final boolean networkSyncOnEnable;
+
     private final Signal<List<PlayerConnectProvider>> providers = Signal.of(Collections.emptyList());
     private final Signal<JoinRequest> currentRequest = Signal.of(null);
 
@@ -102,8 +102,13 @@ public class PlayerConnectFeature extends Feature {
     private @Nullable ManageRoomDialog manageDialog;
     private @Nullable JoinApprovalHudView approvalHud;
     private @Nullable JoinDialogInjector joinInjector;
+    private @Nullable JoinRoomDialog joinRoomDialog;
 
     public PlayerConnectFeature() {
+        this(() -> MindustryTool.getPlayerConnectRooms(""), true);
+    }
+
+    PlayerConnectFeature(Prov<CompletableFuture<List<PlayerConnectRoom>>> roomsFetcher, boolean networkSyncOnEnable) {
         super(FeatureMetadata.builder()
                 .id("player-connect")
                 .icon(Icon.planet)
@@ -111,21 +116,65 @@ public class PlayerConnectFeature extends Feature {
                 .enabledByDefault(true)
                 .build());
 
+        this.networkSyncOnEnable = networkSyncOnEnable;
         config = configGroup();
         roomNameConfig = config.stringValue("roomName", Vars.player != null ? Vars.player.name : "Mindustry Room");
         passwordConfig = config.stringValue("password", "");
         maxPlayerConfig = config.intValue("maxPlayers", Vars.headless ? 30 : 0);
         autoAcceptConfig = config.boolValue("autoAccept", true);
 
+        roomsQuery = Query.<List<PlayerConnectRoom>>builder()
+                .key(QueryKey.of("playerconnect", "rooms"))
+                .enabled(enabled())
+                .fetch(roomsFetcher)
+                .staleTime(Duration.ofSeconds(15))
+                .build();
+        rooms = roomsQuery.data().map(list -> list != null ? list : Collections.emptyList());
+
         registerEventListeners();
+        registerCustomPacket();
     }
 
     public Readable<List<PlayerConnectRoom>> getRooms() {
-        return roomsQuery.data().map(list -> list != null ? list : Collections.emptyList());
+        return rooms;
     }
 
     public Query<List<PlayerConnectRoom>> getRoomsQuery() {
         return roomsQuery;
+    }
+
+    public JoinRoomDialog getJoinRoomDialog() {
+        if (joinRoomDialog == null) {
+            joinRoomDialog = new JoinRoomDialog(this);
+        }
+
+        return joinRoomDialog;
+    }
+
+    private void registerCustomPacket() {
+        if (Vars.netClient == null) {
+            return;
+        }
+        Vars.netClient.addPacketHandler("has-player-connect", (_ignore) -> {
+            Call.serverPacketReliable("has-player-connect", "true");
+        });
+
+        Vars.netClient.addPacketHandler("connect-player-connect", (roomLink) -> {
+            Optional<PlayerConnectRoom> roomOptional = Optional.ofNullable(roomsQuery.data())
+                    .flatMap(query -> query
+                            .peek()
+                            .stream()
+                            .filter(r -> r.getLink().equals(roomLink))
+                            .findFirst());
+
+            if (roomOptional.isPresent()) {
+                Core.app.setClipboardText(roomLink);
+                getJoinRoomDialog().show();
+            } else {
+                Vars.ui.showInfoFade("[scarlet]No room found");
+            }
+
+        });
     }
 
     private void registerEventListeners() {
@@ -168,11 +217,16 @@ public class PlayerConnectFeature extends Feature {
 
     @Override
     public void onEnable() {
-        refreshProviders();
-        startSseSync();
+        if (networkSyncOnEnable) {
+            refreshProviders();
+            startSseSync();
+        }
 
         Core.app.post(() -> {
-            if (approvalHud == null) {
+            if (Vars.ui == null) {
+                return;
+            }
+            if (approvalHud == null && Vars.ui.hudGroup != null) {
                 approvalHud = new JoinApprovalHudView(this);
                 Vars.ui.hudGroup.addChild(approvalHud.element());
             }
@@ -211,11 +265,13 @@ public class PlayerConnectFeature extends Feature {
             }
         }
 
-        PlayerConnectClient.disposePinger();
-        roomsQuery.dispose();
-    }
+        if (joinInjector != null) {
+            joinInjector.dispose();
+            joinInjector = null;
+        }
 
-    // ─── Signals & Properties ──────────────────────────────────────
+        PlayerConnectClient.disposePinger();
+    }
 
     public Readable<Boolean> isFetching() {
         return roomsQuery.fetching();
@@ -252,8 +308,6 @@ public class PlayerConnectFeature extends Feature {
     public @Nullable PlayerConnectLink getActiveLink() {
         return activeLink;
     }
-
-    // ─── Room Hosting & Management ─────────────────────────────────
 
     public void createRoom(String host, int port, Cons<PlayerConnectLink> onSuccess, Cons<Throwable> onError) {
         if (!Vars.net.server()) {
@@ -333,6 +387,14 @@ public class PlayerConnectFeature extends Feature {
         if (wasActive) {
             Events.fire(new PcRoomClosed());
         }
+
+        if (wasActive) {
+            Core.app.post(() -> {
+                if (Vars.ui != null) {
+                    Vars.ui.showInfoFade("Room closed");
+                }
+            });
+        }
     }
 
     public void updateRoomStats() {
@@ -346,8 +408,6 @@ public class PlayerConnectFeature extends Feature {
             closeRoom();
         }
     }
-
-    // ─── Join Request Moderation ───────────────────────────────────
 
     private void onPlayerJoin(PlayerJoin event) {
         if (!isHosting() || Boolean.TRUE.equals(autoAcceptConfig.get())) {
@@ -424,8 +484,6 @@ public class PlayerConnectFeature extends Feature {
         });
     }
 
-    // ─── Real-Time Room Directory & SSE ────────────────────────────
-
     private void startSseSync() {
         stopSseSync();
 
@@ -475,7 +533,10 @@ public class PlayerConnectFeature extends Feature {
         try {
             List<PlayerConnectRoom> list = JsonUtils.fromJsonArray(PlayerConnectRoom.class, json);
             if (list != null) {
-                Core.app.post(() -> roomsQuery.mutate(list));
+                Core.app.post(() -> {
+                    roomsQuery.mutate(list);
+                    Log.info("Updated player connect room list");
+                });
             }
         } catch (Exception e) {
             Log.debug("Failed to parse SSE room payload: @", e);
@@ -497,8 +558,6 @@ public class PlayerConnectFeature extends Feature {
         roomsQuery.refetch();
     }
 
-    // ─── Provider Management ───────────────────────────────────────
-
     public void refreshProviders() {
         MindustryTool.getPlayerConnectProviders()
                 .thenAccept(apiProviders -> {
@@ -506,7 +565,6 @@ public class PlayerConnectFeature extends Feature {
                     if (apiProviders != null) {
                         all.addAll(apiProviders);
                     }
-                    all.add(new PlayerConnectProvider("localhost", "LocalHost", "localhost:11010"));
 
                     List<PlayerConnectProvider> custom = loadCustomProviders();
                     all.addAll(custom);
@@ -515,13 +573,14 @@ public class PlayerConnectFeature extends Feature {
                 })
                 .exceptionally(e -> {
                     List<PlayerConnectProvider> fallback = new ArrayList<>();
-                    fallback.add(new PlayerConnectProvider("localhost", "LocalHost", "localhost:11010"));
                     fallback.addAll(loadCustomProviders());
                     Core.app.post(() -> providers.set(fallback));
                     return null;
                 });
     }
 
+    // Arc's Settings.getJson(String, Class<T>, Class<?>, Prov<T>) derives T from
+    // the container Class, so ArrayMap.class can only yield a raw ArrayMap.
     @SuppressWarnings("unchecked")
     public ArrayMap<String, String> getCustomProviders() {
         return Core.settings.getJson(
@@ -563,8 +622,6 @@ public class PlayerConnectFeature extends Feature {
             refreshProviders();
         }
     }
-
-    // ─── Pause Menu Injection & HUD Ping ──────────────────────────
 
     private void setupPingLabel() {
         if (Vars.ui == null || Vars.ui.hudGroup == null) {
@@ -614,6 +671,8 @@ public class PlayerConnectFeature extends Feature {
             return;
         }
 
+        // Arc's Table.getCells() is declared as Seq<Cell>, with a raw Cell argument
+        // that cannot be recovered from that API.
         @SuppressWarnings("rawtypes")
         Seq<Cell> cells = root.getCells();
         if (cells.isEmpty()) {
@@ -660,7 +719,6 @@ public class PlayerConnectFeature extends Feature {
             addedCell.get().name = PAUSE_BUTTON_NAME;
         }
 
-        // Swap with quit button if present
         if (cells.size >= 2) {
             cells.swap(cells.size - 1, cells.size - 2);
         }

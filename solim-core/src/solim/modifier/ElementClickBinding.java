@@ -4,14 +4,8 @@ import arc.scene.Element;
 import arc.scene.event.ClickListener;
 import arc.scene.event.EventListener;
 import arc.scene.event.InputEvent;
-import arc.util.Log;
 import arc.util.Nullable;
 
-/**
- * Marker click listener installed by {@link ElementConfig#onClick} on an
- * element. It carries the current handler and propagation flag so the generic
- * mixin can replace or update them without a global registry.
- */
 class ElementClickBinding extends ClickListener {
 
     @Nullable
@@ -19,7 +13,6 @@ class ElementClickBinding extends ClickListener {
 
     boolean stop = false;
 
-    /** Finds an existing binding among the element's listeners, if any. */
     static @Nullable ElementClickBinding find(@Nullable Element element) {
         if (element == null) {
             return null;
@@ -41,11 +34,7 @@ class ElementClickBinding extends ClickListener {
             event.stop();
         }
         if (handler != null) {
-            try {
-                handler.run();
-            } catch (Exception e) {
-                Log.err("Error executing element onClick", e);
-            }
+            handler.run();
         }
     }
 }

@@ -8,14 +8,36 @@ import mindustry.world.blocks.storage.CoreBlock.CoreBuild;
 import solim.reactive.Readable;
 import solim.reactive.Signal;
 
-/**
- * Reactive state holder for computed wave preview sections.
- */
 public class WavePreviewState {
     private final Signal<Seq<WaveSectionData>> waves = Signal.of(new Seq<>());
+    private final Signal<Boolean> collapsed = Signal.of(false);
 
     public Readable<Seq<WaveSectionData>> waves() {
         return waves;
+    }
+
+    public void setWaves(Seq<WaveSectionData> waveList) {
+        waves.set(waveList);
+    }
+
+    public Readable<Boolean> collapsed() {
+        return collapsed;
+    }
+
+    public boolean isCollapsed() {
+        return Boolean.TRUE.equals(collapsed.get());
+    }
+
+    public void setCollapsed(boolean value) {
+        collapsed.set(value);
+    }
+
+    public void toggleCollapsed() {
+        Seq<WaveSectionData> currentWaves = waves.get();
+        if (currentWaves == null || currentWaves.size <= 1) {
+            return;
+        }
+        collapsed.set(!isCollapsed());
     }
 
     public void recompute(int currentWave, int depth) {
@@ -29,8 +51,8 @@ public class WavePreviewState {
                 && Vars.state.getPlanet() != null
                 && Vars.state.getPlanet().campaignRules != null
                 && Vars.state.getPlanet().campaignRules.difficulty != null
-                ? Vars.state.getPlanet().campaignRules.difficulty.enemySpawnMultiplier
-                : 1f;
+                        ? Vars.state.getPlanet().campaignRules.difficulty.enemySpawnMultiplier
+                        : 1f;
 
         int clampedDepth = Math.max(WavePreviewFeature.MIN_DEPTH, Math.min(depth, WavePreviewFeature.MAX_DEPTH));
         Seq<WaveSectionData> result = new Seq<>();
@@ -93,5 +115,6 @@ public class WavePreviewState {
 
     public void clear() {
         waves.set(new Seq<>());
+        collapsed.set(false);
     }
 }

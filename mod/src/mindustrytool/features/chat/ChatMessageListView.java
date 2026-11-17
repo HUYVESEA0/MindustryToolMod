@@ -47,7 +47,6 @@ import mindustrytool.models.response.ChatMessage;
 import mindustrytool.models.response.PlayerConnectRoom;
 import mindustrytool.models.response.UserData;
 import mindustrytool.models.response.ChatUser.SimpleRole;
-import solim.core.BaseComponent;
 import solim.core.Component;
 import solim.layout.Card;
 import solim.layout.Direction;
@@ -63,7 +62,7 @@ import arc.scene.event.ClickListener;
 import arc.scene.event.InputEvent;
 import arc.scene.ui.ScrollPane;
 
-public class ChatMessageListView extends BaseComponent {
+public class ChatMessageListView extends Component {
 
     private static final Pattern URL_PATTERN = Pattern.compile("https?://[^\\s<>\"'{}|\\\\^`]+");
 
@@ -168,21 +167,18 @@ public class ChatMessageListView extends BaseComponent {
 
         scrollToBottom();
 
-        return column().name("chat-list").grow().top().left().gap(unit(1)).padding(unit(2)).children(() -> {
+        return column().name("chat-list").props(grow(), padding(unit(2)), top(), left(), gap(unit(1))).children(() -> {
             dynamic(hasChannel, channelSelected -> {
                 if (!Boolean.TRUE.equals(channelSelected)) {
                     query(store.channels().channelsQuery())
-                            .grow()
+                            .props(grow())
                             .loading(Loader::centered)
-                            .error(chanErr -> column().grow().center().gap(unit(2)).padding(unit(4)).children(() -> {
-                                icon(Icon.warning).size(unit(6)).color(Color.scarlet);
+                            .error(chanErr -> column().props(grow(), padding(unit(4)), center(), gap(unit(2))).children(() -> {
+                                icon(Icon.warning).props(size(unit(6)), prefWidth(unit(6)), prefHeight(unit(6)), color(Color.scarlet));
                                 text(Core.bundle.get("feature.chat.ui.channels-failed", "Channels failed to load."))
-                                        .color(Color.scarlet)
-                                        .fontScale(1.0f)
-                                        .wrap()
-                                        .center();
-                                text(chanErr != null ? chanErr.getMessage() : "").color(Color.gray).fontScale(0.85f)
-                                        .wrap().center();
+                                        .props(color(Color.scarlet), fontScale(1.0f), textWrap(true), center());
+                                text(chanErr != null ? chanErr.getMessage() : "")
+                                        .props(color(Color.gray), fontScale(0.85f), textWrap(true), center());
                                 button(Core.bundle.get("feature.chat.ui.retry-channels", "Retry Channels"), () -> {
                                     if (service != null) {
                                         service.refreshChannels();
@@ -190,79 +186,70 @@ public class ChatMessageListView extends BaseComponent {
                                         store.channels().channelsQuery().refetch();
                                     }
                                 })
-                                        .style(WebStyles.secondary())
-                                        .height(unit(10))
+                                        .props(style(WebStyles.secondary()), height(unit(10)), prefHeight(unit(10)))
                                         .children(() -> {
-                                            icon(Icon.refresh).size(unit(4));
+                                            icon(Icon.refresh).props(size(unit(4)), prefWidth(unit(4)), prefHeight(unit(4)));
                                             text(Core.bundle.get("feature.chat.ui.retry-channels",
                                                     "Retry Channels"));
                                         });
                             }))
-                            .data(channels -> column().padding(unit(4)).top().left().children(() -> {
+                            .data(channels -> column().props(padding(unit(4)), top(), left()).children(() -> {
                                 text(Core.bundle.get("feature.chat.ui.empty-channels", "No channels available."))
-                                        .color(Color.gray)
-                                        .fontScale(0.9f)
-                                        .left();
-                            })).grow();
+                                        .props(color(Color.gray), fontScale(0.9f), left());
+                            })).props(grow());
                 } else {
 
-column().grow().top().left().gap(unit(1)).children(() -> {
-                     when(showRefreshErrorBanner)
-                         .thenDo(() -> {
-                             card().growX().padding(unit(1.5f)).children(() -> {
-                                row().growX().gap(unit(1)).center().children(() -> {
-                                    icon(Icon.warning).size(unit(4)).color(Color.scarlet);
-                                    text(Core.bundle.get("feature.chat.ui.refresh-failed",
-                                            "Failed to refresh messages."))
-                                                    .color(Color.scarlet)
-                                                    .fontScale(0.85f)
-                                                    .growX()
-                                                    .left();
-                                    button(Core.bundle.get("feature.chat.ui.retry", "Retry"), () -> {
-                                        String activeId = store.channels().currentActiveId();
-                                        if (activeId != null && service != null) {
-                                            service.loadMessages(activeId);
-                                        }
-                                    })
-                                            .style(WebStyles.secondary())
-                                            .height(unit(8))
-                                            .children(() -> {
-                                                icon(Icon.refresh).size(unit(4));
-                                                text(Core.bundle.get("feature.chat.ui.retry", "Retry"));
-                                            });
-});
-                             });
-                         }
-                    );
+                    column().props(grow(), top(), left(), gap(unit(1))).children(() -> {
+                        when(showRefreshErrorBanner)
+                                .thenDo(() -> {
+                                    card().props(growX(), padding(unit(1.5f))).children(() -> {
+                                        row().props(growX(), gap(unit(1)), center()).children(() -> {
+                                            icon(Icon.warning).props(size(unit(4)), prefWidth(unit(4)), prefHeight(unit(4)), color(Color.scarlet));
+                                            text(Core.bundle.get("feature.chat.ui.refresh-failed",
+                                                    "Failed to refresh messages."))
+                                                    .props(color(Color.scarlet), fontScale(0.85f), growX(), left());
+                                            button(Core.bundle.get("feature.chat.ui.retry", "Retry"), () -> {
+                                                String activeId = store.channels().currentActiveId();
+                                                if (activeId != null && service != null) {
+                                                    service.loadMessages(activeId);
+                                                }
+                                            })
+                                                    .props(style(WebStyles.secondary()), height(unit(8)), prefHeight(unit(8)))
+                                                    .children(() -> {
+                                                        icon(Icon.refresh).props(size(unit(4)), prefWidth(unit(4)), prefHeight(unit(4)));
+                                                        text(Core.bundle.get("feature.chat.ui.retry", "Retry"));
+                                                    });
+                                        });
+                                    });
+                                });
 
-when(showEndOfHistory)
-                         .thenDo(() -> {
-                             row().top().center().growX().padding(unit(2)).children(() -> {
-                                text(Core.bundle.get("feature.chat.ui.end-of-history", "Beginning of chat history"))
-                                        .color(Color.gray)
-                                        .fontScale(0.85f);
-});
-                         }
-                    );
+                        when(showEndOfHistory)
+                                .thenDo(() -> {
+                                    row().props(top(), center(), growX(), padding(unit(2))).children(() -> {
+                                        text(Core.bundle.get("feature.chat.ui.end-of-history",
+                                                "Beginning of chat history"))
+                                                .props(color(Color.gray), fontScale(0.85f));
+                                    });
+                                });
 
-                    when(store.messages().loadingOlder())
-                         .thenDo(() -> {
-                             row().top().left().padding(unit(2)).children(() -> {
-                                text(Core.bundle.get("feature.chat.ui.loading-older", "Loading older messages..."))
-                                        .color(Color.gray)
-                                        .fontScale(0.85f)
-                                        .left();
-});
-                         }
-                    );
+                        when(store.messages().loadingOlder())
+                                .thenDo(() -> {
+                                    row().props(top(), left(), padding(unit(2))).children(() -> {
+                                        text(Core.bundle.get("feature.chat.ui.loading-older",
+                                                "Loading older messages..."))
+                                                .props(color(Color.gray), fontScale(0.85f), left());
+                                    });
+                                });
 
-                    when(hasMessages)
-                            .thenDo(() -> {
-                            VirtualList<MessageGroup> list = virtualList(
-                                    groupedMessages,
-                                    ChatMessageHeightCalculator::calculateHeight);
-                            list.key(MessageGroup::getKey).grow().gap(unit(0.75f)).overscan(3)
-                                    .onReachTop(50f, () -> {
+                        when(hasMessages)
+                                .thenDo(() -> {
+                                    virtualList = virtualList(
+                                            groupedMessages,
+                                            ChatMessageHeightCalculator::calculateHeight)
+                                            .key(MessageGroup::getKey)
+                                            .props(grow(), gap(unit(0.75f)), marginBottom(unit(2)))
+                                            .overscan(3)
+                                            .onReachTop(50f, () -> {
                                                 String activeId = store.channels().currentActiveId();
                                                 List<ChatMessage> msgs = store.messages().currentActive();
                                                 if (activeId != null && !activeId.isEmpty() && service != null
@@ -271,54 +258,55 @@ when(showEndOfHistory)
                                                         && !store.messages().isFullyLoaded(activeId)) {
                                                     service.fetchOlderMessages(activeId);
                                                 }
-                                            }).marginBottom(unit(2));
-                            list.children(item -> new MessageGroupView(item, store, service));
-                            virtualList = list;
-                        })
-                        .elseDo(() -> {
-                            when(store.messages().activeLoadingInitial())
-                                    .thenDo(() -> Loader.centered())
-                                    .elseDo(() -> {
-                                        dynamic(store.messages().activeError(), err -> {
-                                if (err != null && !err.trim().isEmpty()) {
-                                    column().grow().center().gap(unit(2)).padding(unit(4)).children(() -> {
-                                        icon(Icon.warning).size(unit(6)).color(Color.scarlet);
-                                        text(Core.bundle.get("feature.chat.ui.error.messages",
-                                                "Failed to load messages."))
-                                                        .color(Color.scarlet)
-                                                        .fontScale(1.0f)
-                                                        .wrap()
-                                                        .center();
-                                        text(err).color(Color.gray).fontScale(0.85f).wrap().center();
-                                        button(Core.bundle.get("feature.chat.ui.retry", "Retry"), () -> {
-                                            String activeId = store.channels().currentActiveId();
-                                            if (activeId != null && service != null) {
-                                                service.loadMessages(activeId);
-                                            }
-                                        })
-                                                .style(WebStyles.secondary())
-                                                .height(unit(10))
-                                                .children(() -> {
-                                                    icon(Icon.refresh).size(unit(4));
-                                                    text(Core.bundle.get("feature.chat.ui.retry", "Retry"));
-                                                });
-                                    });
-                                } else {
-                                    column().padding(unit(4)).top().left().children(() -> {
-                                    text(Core.bundle.get("feature.chat.ui.empty-messages", "No messages yet."))
-                                            .color(Color.gray)
-                                            .fontScale(0.9f)
-                                            .left();
-                                    });
-                                }
-                            }).grow();
-                                    })
-                                    .grow();
-                            })
-                            .grow();
-                }).grow();
+                                            })
+                                            .items(item -> new MessageGroupView(item, store, service));
+                                })
+                                .elseDo(() -> {
+                                    when(store.messages().activeLoadingInitial())
+                                            .thenDo(() -> Loader.centered())
+                                            .elseDo(() -> {
+                                                dynamic(store.messages().activeError(), err -> {
+                                                    if (err != null && !err.trim().isEmpty()) {
+                                                        column().props(grow(), padding(unit(4)), center(), gap(unit(2)))
+                                                                .children(() -> {
+                                                                    icon(Icon.warning).props(size(unit(6)), prefWidth(unit(6)), prefHeight(unit(6)), color(Color.scarlet));
+                                                                    text(Core.bundle.get(
+                                                                            "feature.chat.ui.error.messages",
+                                                                            "Failed to load messages."))
+                                                                            .props(color(Color.scarlet), fontScale(1.0f), textWrap(true), center());
+                                                                    text(err).props(color(Color.gray), fontScale(0.85f), textWrap(true), center());
+                                                                    button(Core.bundle.get("feature.chat.ui.retry",
+                                                                            "Retry"), () -> {
+                                                                                String activeId = store.channels()
+                                                                                        .currentActiveId();
+                                                                                if (activeId != null
+                                                                                        && service != null) {
+                                                                                    service.loadMessages(activeId);
+                                                                                }
+                                                                            })
+                                                                            .props(style(WebStyles.secondary()), height(unit(10)), prefHeight(unit(10)))
+                                                                            .children(() -> {
+                                                                                icon(Icon.refresh).props(size(unit(4)), prefWidth(unit(4)), prefHeight(unit(4)));
+                                                                                text(Core.bundle.get(
+                                                                                        "feature.chat.ui.retry",
+                                                                                        "Retry"));
+                                                                            });
+                                                                });
+                                                    } else {
+                                                        column().props(padding(unit(4)), top(), left()).children(() -> {
+                                                            text(Core.bundle.get("feature.chat.ui.empty-messages",
+                                                                    "No messages yet."))
+                                                                    .props(color(Color.gray), fontScale(0.9f), left());
+                                                        });
+                                                    }
+                                                }).props(grow());
+                                            })
+                                            .props(grow());
+                                })
+                                .props(grow());
+                    }).props(grow());
                 }
-            }).grow();
+            }).props(grow());
         }).element();
     }
 
@@ -333,7 +321,7 @@ when(showEndOfHistory)
         });
     }
 
-    static class MessageGroupView extends BaseComponent {
+    static class MessageGroupView extends Component {
         private final MessageGroup group;
         private final ChatStore store;
         private final @Nullable ChatService service;
@@ -380,49 +368,38 @@ when(showEndOfHistory)
             String timeStr = formatTime(group.getCreatedAt());
 
             return row()
-                    .growX()
-                    .top().left()
-                    .gap(ChatMessageHeightCalculator.AVATAR_GAP)
-                    .padding(ChatMessageHeightCalculator.UNIT_1)
+                    .props(growX(), top(), left(), gap(ChatMessageHeightCalculator.AVATAR_GAP), padding(ChatMessageHeightCalculator.UNIT_1))
                     .children(() -> {
-                        // Shared group avatar on the left, pinned to the top
+
                         new ChatAvatar(authorName, avatarUrl, authorId, ChatMessageHeightCalculator.AVATAR_SIZE);
 
-                        // Right column: header followed by stacked messages
-                        column().growX().top().left().children(() -> {
-                            // Author and timestamp header + action button
-                            row().growX().top().left()
-                                    .gap(unit(2))
-                                    .height(ChatMessageHeightCalculator.HEADER_HEIGHT
-                                            + ChatMessageHeightCalculator.HEADER_GAP)
+                        column().props(growX(), top(), left()).children(() -> {
+
+                            row().props(growX(), top(), left(), gap(unit(2)),
+                                    height(ChatMessageHeightCalculator.HEADER_HEIGHT
+                                            + ChatMessageHeightCalculator.HEADER_GAP), prefHeight(ChatMessageHeightCalculator.HEADER_HEIGHT
+                                            + ChatMessageHeightCalculator.HEADER_GAP))
                                     .children(() -> {
                                         text(authorName)
-                                                .color(authorColor)
-                                                .left();
+                                                .props(color(authorColor), left());
 
                                         if (!timeStr.isEmpty()) {
                                             text(timeStr)
-                                                    .color(Color.gray)
-                                                    .fontScale(0.8f)
-                                                    .marginLeft(unit(1))
-                                                    .left();
+                                                    .props(color(Color.gray), fontScale(0.8f), marginLeft(unit(1)), left());
                                         }
 
                                         spacer();
 
-                                        // Action ellipsis / menu button
                                         Button actionsButton = button(() -> {
                                         });
                                         actionsButton
                                                 .onClick(() -> openActions(first, actionsButton.element()))
-                                                .style(Styles.clearNonei)
-                                                .size(unit(6), unit(6))
+                                                .props(style(Styles.clearNonei), size(unit(6), unit(6)), prefWidth(unit(6)), prefHeight(unit(6)))
                                                 .children(() -> icon(FileIcon.of("ellipsis-vertical.png"))
-                                                        .size(unit(6), unit(6)));
+                                                        .props(size(unit(6), unit(6)), prefWidth(unit(6)), prefHeight(unit(6))));
                                     });
 
-                            // Stacked message rows
-                            column().growX().top().left().children(() -> {
+                            column().props(growX(), top(), left()).children(() -> {
                                 List<ParsedChatMessage> messages = group.getMessages();
                                 for (int i = 0; i < messages.size(); i++) {
                                     buildMessageRow(messages.get(i), i > 0);
@@ -440,31 +417,31 @@ when(showEndOfHistory)
             Readable<Boolean> isPending = store.delivery().isPending(msgId);
             Readable<Boolean> isFailed = store.delivery().isFailed(msgId);
 
-            Card card = card().growX().top().left();
+            Card card = card().props(growX(), top(), left());
 
-            card.onClick(() -> openActions(parsed, card.element()));
+            card.props(onClick(() -> openActions(parsed, card.element())));
             if (hasPrevious) {
-                card.marginTop(ChatMessageHeightCalculator.MESSAGE_GAP);
+                card.props(marginTop(ChatMessageHeightCalculator.MESSAGE_GAP));
             }
 
             card.children(() -> {
-                row().growX().top().left()
+                row().props(growX(), top(), left())
                         .children(() -> {
                             if (mentioned) {
-                                divider(Direction.Y).color(Pal.accent).width(unit(1)).marginRight(unit(1));
+                                divider(Direction.Y).props(color(Pal.accent), width(unit(1)), marginRight(unit(1)));
                             }
 
-                            if (raw.getReplyTo() != null && !raw.getReplyTo().isEmpty()) {
-                                column().growX().top().left().children(() -> {
+                            column().props(growX(), top(), left()).children(() -> {
+                                if (raw.getReplyTo() != null && !raw.getReplyTo().isEmpty()) {
                                     buildReplyPreview(raw.getReplyTo());
-                                    column().growX().top().left().marginTop(ChatMessageHeightCalculator.REPLY_GAP)
+                                    column().props(growX(), marginTop(ChatMessageHeightCalculator.REPLY_GAP), top(), left())
                                             .children(() -> {
                                                 buildMessageBody(parsed, isPending, isFailed);
                                             });
-                                });
-                            } else {
-                                buildMessageBody(parsed, isPending, isFailed);
-                            }
+                                } else {
+                                    buildMessageBody(parsed, isPending, isFailed);
+                                }
+                            });
                         });
             });
         }
@@ -480,7 +457,7 @@ when(showEndOfHistory)
                 } catch (Throwable ignored) {
                 }
             }
-            ChatActionPopup.showFor(message, x, y);
+            ChatActionPopup.showFor(store, message, x, y);
         }
 
         private void buildReplyPreview(String replyToId) {
@@ -504,13 +481,10 @@ when(showEndOfHistory)
             }
 
             final String displaySnippet = targetSnippet;
-            row().growX().top().left().height(ChatMessageHeightCalculator.REPLY_PREVIEW_HEIGHT).children(() -> {
-                icon(Icon.rightSmall).size(unit(4), unit(4)).color(Color.gray).marginRight(unit(1));
+            row().props(growX(), height(ChatMessageHeightCalculator.REPLY_PREVIEW_HEIGHT), prefHeight(ChatMessageHeightCalculator.REPLY_PREVIEW_HEIGHT), top(), left()).children(() -> {
+                icon(Icon.rightSmall).props(size(unit(4), unit(4)), prefWidth(unit(4)), prefHeight(unit(4)), color(Color.gray), marginRight(unit(1)));
                 text(displaySnippet)
-                        .color(Color.gray)
-                        .fontScale(0.8f)
-                        .ellipsis()
-                        .left();
+                        .props(color(Color.gray), fontScale(0.8f), ellipsis(true), left());
             });
         }
 
@@ -535,15 +509,11 @@ when(showEndOfHistory)
             if (parsed instanceof ImageMessage) {
                 ImageMessage img = (ImageMessage) parsed;
                 final String imageUrl = img.getImageUrl();
-                column().growX().top().left().gap(unit(1)).children(() -> {
-                    text(imageUrl).color(Color.lightGray).fontScale(0.85f).wrap().left().growX();
-                    networkImage(imageUrl)
-                            .onClick(() -> new ChatImagePreviewDialog(imageUrl).show())
-                            .stopClickPropagation(true)
-                            .placeholder(Icon.image)
-                            .fallback(Icon.cancel)
-                            .size(unit(40), unit(30))
-                            .top().left();
+                column().props(growX(), top(), left(), gap(unit(1))).children(() -> {
+                    text(imageUrl).props(color(Color.lightGray), fontScale(0.85f), textWrap(true), left(), growX());
+                    image(imageUrl)
+                            .props(onClick(() -> new ChatImagePreviewDialog(imageUrl).show()), stopClickPropagation(true),
+                                    placeholder(Icon.image), fallback(Icon.cancel), size(unit(40), unit(30)), top(), left());
                 });
                 return;
             }
@@ -554,25 +524,22 @@ when(showEndOfHistory)
                 final String type = toolLink.getType();
                 final String itemId = toolLink.getItemId();
 
-                card().growX().top().left().children(() -> {
-                    column().growX().top().left().padding(unit(1.5f)).gap(unit(1)).children(() -> {
-                        row().growX().top().left().gap(unit(1)).children(() -> {
-                            icon("maps".equals(type) ? Icon.map : Icon.paste).size(unit(5), unit(5)).color(Pal.accent);
+                card().props(growX(), height(ChatMessageHeightCalculator.TOOL_LINK_CARD_HEIGHT), prefHeight(ChatMessageHeightCalculator.TOOL_LINK_CARD_HEIGHT), top(), left()).children(() -> {
+                    column().props(grow(), padding(unit(1.5f)), top(), left(), gap(unit(1))).children(() -> {
+                        row().props(growX(), top(), left(), gap(unit(1))).children(() -> {
+                            icon("maps".equals(type) ? Icon.map : Icon.paste).props(size(unit(5), unit(5)), prefWidth(unit(5)), prefHeight(unit(5)), color(Pal.accent));
                             text(("maps".equals(type) ? "Map: " : "Schematic: ") + itemId)
-                                    .color(Pal.accent)
-                                    .fontScale(0.95f)
-                                    .ellipsis()
-                                    .left();
+                                    .props(color(Pal.accent), fontScale(0.95f), ellipsis(true), left());
                         });
-                        row().top().left().gap(unit(1)).children(() -> {
+                        row().props(top(), left(), gap(unit(1))).children(() -> {
                             button(Core.bundle.get("button.copy", "Copy Link"), () -> {
                                 Core.app.setClipboardText(fullUrl);
                                 Vars.ui.showInfoFade(Core.bundle.get("feature.chat.ui.copied", "Copied!"));
-                            }).style(Styles.defaultt).height(unit(7));
+                            }).props(style(Styles.defaultt), height(unit(7)), prefHeight(unit(7)));
 
                             button(Core.bundle.get("feature.chat.ui.view-web", "View in Browser"), () -> {
                                 Core.app.openURI(fullUrl);
-                            }).style(Styles.defaultt).height(unit(7));
+                            }).props(style(Styles.defaultt), height(unit(7)), prefHeight(unit(7)));
                         });
                     });
                 });
@@ -587,54 +554,103 @@ when(showEndOfHistory)
             if (parsed instanceof SchematicMessage) {
                 SchematicMessage schemMsg = (SchematicMessage) parsed;
                 if (schemMsg.getPrefixText() != null && !schemMsg.getPrefixText().isEmpty()) {
-                    text(schemMsg.getPrefixText()).color(bodyColor).fontScale(1.0f).wrap().left().growX();
+                    text(schemMsg.getPrefixText()).props(color(bodyColor), fontScale(1.0f), textWrap(true), left(), growX());
                 }
 
                 buildSchematicCard(schemMsg.getSchematic());
 
                 if (schemMsg.getSuffixText() != null && !schemMsg.getSuffixText().isEmpty()) {
-                    text(schemMsg.getSuffixText()).color(bodyColor).fontScale(1.0f).wrap().left().growX();
+                    text(schemMsg.getSuffixText()).props(color(bodyColor), fontScale(1.0f), textWrap(true), left(), growX());
                 }
                 return;
             }
 
             if (parsed instanceof TextMessage) {
                 TextMessage txt = (TextMessage) parsed;
-                buildMessageText(txt.getText(), bodyColor);
                 final String translatedId = parsed.getId();
-dynamic(store.translations().get(translatedId), translated -> {
-                     if (translated != null && !translated.isEmpty()) {
-                         final String translatedText = translated;
-                         column().growX().top().left().marginTop(unit(1)).children(() -> {
-                        text(Core.bundle.get("feature.chat.ui.translated-badge", "Translated"))
-                                .color(Pal.accent)
-                                .fontScale(0.8f)
-                                .left();
-                        buildMessageText(translatedText, bodyColor);
-                    });
-                }
+
+                Readable<TranslationViewState> viewState = new Computed<>(() -> {
+                    String tr = store.translations().get(translatedId).get();
+                    boolean orig = Boolean.TRUE.equals(store.translations().isShowingOriginal(translatedId).get());
+                    String currentTranslating = store.ui().translatingMessageId().get();
+                    boolean isTranslating = currentTranslating != null && currentTranslating.equals(translatedId);
+                    return new TranslationViewState(tr, orig, isTranslating);
                 });
-dynamic(store.ui().translatingMessageId(), translatingId -> {
-                     if (translatingId != null && translatingId.equals(translatedId)) {
-                         row().growX().top().left().children(() -> {
-                        text(Core.bundle.get("feature.chat.ui.translating", "Translating..."))
-                                .color(Color.gray)
-                                .fontScale(0.8f)
-                                .left();
-                    });
-                }
-                });
+
+                dynamic(viewState, state -> {
+                    if (state != null && state.translated != null && !state.translated.trim().isEmpty()) {
+                        String textToDisplay = state.showOriginal ? txt.getText() : state.translated;
+                        column().props(growX(), top(), left()).children(() -> {
+                            buildMessageText(textToDisplay, bodyColor);
+                            buildTranslationToggleChip(translatedId, state.showOriginal);
+                        });
+                    } else {
+                        column().props(growX(), top(), left()).children(() -> {
+                            buildMessageText(txt.getText(), bodyColor);
+                            if (state != null && state.translating) {
+                                row().props(growX(), marginTop(unit(1)), top(), left(), gap(unit(1))).children(() -> {
+                                    icon(FileIcon.of("translate.png", Icon.refresh))
+                                            .props(size(unit(3.5f), unit(3.5f)), prefWidth(unit(3.5f)), prefHeight(unit(3.5f)), color(Color.lightGray));
+                                    text(Core.bundle.get("feature.chat.ui.translating", "Translating..."))
+                                            .props(color(Color.lightGray), fontScale(0.8f), left());
+                                });
+                            }
+                        });
+                    }
+                }).props(growX());
                 return;
             }
 
-            // Fallback
             String fallback = parsed.getContent() != null ? parsed.getContent() : "";
             text(fallback)
-                    .color(bodyColor)
-                    .fontScale(1.0f)
-                    .left()
-                    .wrap()
-                    .growX();
+                    .props(color(bodyColor), fontScale(1.0f), left(), textWrap(true), growX());
+        }
+
+        private void buildTranslationToggleChip(String messageId, boolean showingOriginal) {
+            button(() -> {
+                store.translations().toggleOriginal(messageId);
+                ChatMessageHeightCalculator.clearCache();
+            })
+                    .props(style(WebStyles.ghost()), padding(unit(0.5f), unit(1.5f), unit(0.5f), unit(1.5f)), height(unit(6)), prefHeight(unit(6)), marginTop(unit(1)), left())
+                    .children(() -> {
+                        row().props(gap(unit(1)), center()).children(() -> {
+                            icon(FileIcon.of("translate.png", Icon.refresh))
+                                    .props(size(unit(3.5f), unit(3.5f)), prefWidth(unit(3.5f)), prefHeight(unit(3.5f)), color(Pal.accent));
+                            text(showingOriginal
+                                    ? Core.bundle.get("feature.chat.ui.show-translated", "Show translation")
+                                    : Core.bundle.get("feature.chat.ui.show-original", "Translated • Show original"))
+                                    .props(color(Pal.accent), fontScale(0.8f), left());
+                        });
+                    });
+        }
+
+        private static final class TranslationViewState {
+            final @Nullable String translated;
+            final boolean showOriginal;
+            final boolean translating;
+
+            TranslationViewState(@Nullable String translated, boolean showOriginal, boolean translating) {
+                this.translated = translated;
+                this.showOriginal = showOriginal;
+                this.translating = translating;
+            }
+
+            @Override
+            public boolean equals(Object o) {
+                if (this == o)
+                    return true;
+                if (!(o instanceof TranslationViewState))
+                    return false;
+                TranslationViewState that = (TranslationViewState) o;
+                return showOriginal == that.showOriginal &&
+                        translating == that.translating &&
+                        Objects.equals(translated, that.translated);
+            }
+
+            @Override
+            public int hashCode() {
+                return Objects.hash(translated, showOriginal, translating);
+            }
         }
 
         private void buildRoomInviteCard(String link) {
@@ -643,61 +659,67 @@ dynamic(store.ui().translatingMessageId(), translatingId -> {
                     ? pc.getRooms().map(rooms -> findRoomByLink(rooms, link))
                     : Signal.of(null);
 
-dynamic(roomSignal, room -> {
-                 if (room != null) {
-                     new RoomCard(room, false);
-                 } else {
-                     buildFallbackRoomCardContent(link);
-                 }
-             })
-                    .height(ChatMessageHeightCalculator.INVITE_CARD_HEIGHT)
-                    .growX()
+            dynamic(roomSignal, room -> {
+                if (room != null) {
+                    new RoomCard(room, false);
+                } else {
+                    buildFallbackRoomCardContent(link);
+                }
+            })
+                    .props(height(ChatMessageHeightCalculator.INVITE_CARD_HEIGHT), prefHeight(ChatMessageHeightCalculator.INVITE_CARD_HEIGHT), growX())
                     .name("pc-card-wrapper");
         }
 
         private Component buildFallbackRoomCardContent(String link) {
-            return column()
-                    .grow()
-                    .gap(unit(1))
+            return card()
+                    .name("pc-card-fallback")
+                    .props(background(Styles.black8), border(1.5f, Color.darkGray), gap(unit(1.5f)), padding(unit(2)), left(), grow())
                     .children(() -> {
-                        text(Core.bundle.get("feature.chat.ui.room-invite", "Room Invite"))
-                                .color(Pal.accent)
-                                .fontScale(0.95f)
-                                .ellipsis()
-                                .growX()
-                                .left();
 
-                        text(Core.bundle.get("feature.chat.ui.unlisted-offline", "Unlisted or offline"))
-                                .color(Color.scarlet)
-                                .fontScale(0.85f)
-                                .left();
+                        row().props(growX(), height(unit(6)), prefHeight(unit(6)), gap(unit(2))).children(() -> {
+                            text(Core.bundle.get("feature.chat.ui.room-invite", "Room Invite"))
+                                    .props(style(Styles.outlineLabel), fontScale(0.95f), ellipsis(true), growX(), left());
+                            spacer();
+                        });
 
-                        text(link.replace(PlayerConnectFeature.PLAYER_CONNECT_PROTOCOL, ""))
-                                .color(Color.lightGray).fontScale(0.85f).ellipsis().growX().left();
+                        row().props(growX(), height(unit(4.5f)), prefHeight(unit(4.5f))).children(() -> {
+                            text(Core.bundle.get("feature.chat.ui.unlisted-offline", "Unlisted or offline"))
+                                    .props(color(Color.scarlet), fontScale(0.9f), growX(), ellipsis(true), left());
+                        });
 
-                        spacer();
+                        row().props(growX(), height(unit(4.5f)), prefHeight(unit(4.5f))).children(() -> {
+                            text(link.replace(PlayerConnectFeature.PLAYER_CONNECT_PROTOCOL, ""))
+                                    .props(color(Color.lightGray), fontScale(0.9f), growX(), ellipsis(true), left());
+                        });
 
-                        row().growX().gap(unit(1)).children(() -> {
-                        when(FeatureManager.get(PlayerConnectFeature.class).enabled())
-                                .thenDo(() -> button(Core.bundle.get("feature.chat.ui.try-connect", "Try Connect"),
-                                        () -> promptDirectJoin(link))
-                                                .style(WebStyles.secondary())
-                                                .growX()
-                                                .height(unit(11)))
-                                .elseDo(() -> button(
-                                        Core.bundle.get("feature.chat.ui.enable-player-connect", "Enable Player Connect"),
-                                        () -> FeatureManager.getFeature(PlayerConnectFeature.class).enable())
-                                                .style(WebStyles.secondary())
-                                                .growX()
-                                                .height(unit(11)))
-                                .growX();
+                        row().props(growX(), height(unit(4.5f)), prefHeight(unit(4.5f))).children(() -> {
+                            text(Core.bundle.get("feature.player-connect.title", "Player Connect"))
+                                    .props(color(Color.gray), fontScale(0.85f), growX(), ellipsis(true), left());
+                        });
+
+                        row().props(gap(unit(1)), growX(), height(unit(11)), prefHeight(unit(11))).children(() -> {
+
+                            PlayerConnectFeature connect = FeatureManager.getFeature(PlayerConnectFeature.class);
+                            Readable<Boolean> connectEnabled = connect != null
+                                    ? connect.enabled()
+                                    : Readable.of(false);
+                            when(connectEnabled)
+                                    .thenDo(() -> button(Core.bundle.get("feature.chat.ui.try-connect", "Try Connect"),
+                                            () -> promptDirectJoin(link))
+                                            .props(style(WebStyles.secondary()), growX(), height(unit(11)), prefHeight(unit(11))))
+                                    .elseDo(() -> button(
+                                            Core.bundle.get("feature.chat.ui.enable-player-connect",
+                                                    "Enable Player Connect"),
+                                            () -> FeatureManager.getFeature(PlayerConnectFeature.class).enable())
+                                            .props(style(WebStyles.secondary()), growX(), height(unit(11)), prefHeight(unit(11))))
+                                    .props(growX());
+
                             button(() -> {
                                 Core.app.setClipboardText(link);
                                 Vars.ui.showInfoFade("@copied");
                             })
-                                    .style(WebStyles.outline())
-                                    .size(unit(11))
-                                    .children(() -> icon(Icon.copy).size(unit(5)));
+                                    .props(style(WebStyles.outline()), size(unit(11)), prefWidth(unit(11)), prefHeight(unit(11)))
+                                    .children(() -> icon(Icon.copy).props(size(unit(5)), prefWidth(unit(5)), prefHeight(unit(5))));
                         });
                     });
         }
@@ -738,57 +760,45 @@ dynamic(roomSignal, room -> {
         }
 
         private void buildSchematicCard(Schematic schematic) {
-            card().top().left().children(() -> {
-                column().top().left().gap(unit(1)).children(() -> {
-                    // Header: just the name
-                    row().growX().top().left().gap(unit(1)).children(() -> {
+            card().props(height(ChatMessageHeightCalculator.SCHEMATIC_CARD_HEIGHT), prefHeight(ChatMessageHeightCalculator.SCHEMATIC_CARD_HEIGHT), top(), left()).children(() -> {
+                column().props(grow(), top(), left(), gap(unit(1))).children(() -> {
+
+                    row().props(growX(), height(unit(6)), prefHeight(unit(6)), top(), left(), gap(unit(1))).children(() -> {
                         text(schematic.name())
-                                .color(Pal.accent)
-                                .fontScale(0.95f)
-                                .ellipsis()
-                                .growX()
-                                .left();
+                                .props(color(Pal.accent), fontScale(0.95f), ellipsis(true), growX(), left());
 
                         spacer();
                     });
 
-                    // Preview image button
                     float ratio = schematic.height > 0 ? (float) schematic.width / (float) schematic.height : 1f;
                     float width = Math.max(unit(10), ratio * unit(35));
 
                     button(() -> useSchematic(schematic))
-                            .style(Styles.flatt)
-                            .height(unit(35))
-                            .width(width)
+                            .props(style(Styles.flatt), height(unit(35)), prefHeight(unit(35)), width(width), prefWidth(width))
                             .children(() -> {
-                                arc(new SchematicImage(schematic).setScaling(Scaling.fit));
+                                if (Vars.schematics != null) {
+                                    arc(new SchematicImage(schematic).setScaling(Scaling.fit));
+                                } else {
+                                    icon(Icon.paste).props(size(unit(10)), prefWidth(unit(10)), prefHeight(unit(10)));
+                                }
                             });
 
-                    // Action buttons row below preview
-                    row().growX().top().left().gap(unit(1)).children(() -> {
+                    row().props(growX(), height(unit(7)), prefHeight(unit(7)), top(), left(), gap(unit(1))).children(() -> {
                         button(() -> Vars.ui.schematics.showInfo(schematic))
-                                .style(Styles.clearNonei)
-                                .size(unit(6), unit(6))
-                                .tooltip(Core.bundle.get("info.title", "Info"))
-                                .children(() -> icon(FileIcon.of("info.png")).size(unit(5), unit(5)));
+                                .props(style(Styles.clearNonei), size(unit(6), unit(6)), prefWidth(unit(6)), prefHeight(unit(6)), tooltip(Core.bundle.get("info.title", "Info")))
+                                .children(() -> icon(FileIcon.of("info.png")).props(size(unit(5), unit(5)), prefWidth(unit(5)), prefHeight(unit(5))));
 
                         button(() -> Vars.ui.schematics.showExport(schematic))
-                                .style(Styles.clearNonei)
-                                .size(unit(6), unit(6))
-                                .tooltip(Core.bundle.get("editor.export", "Export"))
-                                .children(() -> icon(Icon.upload).size(unit(5), unit(5)));
+                                .props(style(Styles.clearNonei), size(unit(6), unit(6)), prefWidth(unit(6)), prefHeight(unit(6)), tooltip(Core.bundle.get("editor.export")))
+                                .children(() -> icon(Icon.upload).props(size(unit(5), unit(5)), prefWidth(unit(5)), prefHeight(unit(5))));
 
                         button(() -> Vars.ui.schematics.showEdit(schematic))
-                                .style(Styles.clearNonei)
-                                .size(unit(6), unit(6))
-                                .tooltip(Core.bundle.get("schematic.edit", "Edit"))
-                                .children(() -> icon(Icon.pencil).size(unit(5), unit(5)));
+                                .props(style(Styles.clearNonei), size(unit(6), unit(6)), prefWidth(unit(6)), prefHeight(unit(6)), tooltip(Core.bundle.get("schematic.edit")))
+                                .children(() -> icon(Icon.pencil).props(size(unit(5), unit(5)), prefWidth(unit(5)), prefHeight(unit(5))));
 
                         button(() -> useSchematic(schematic))
-                                .style(Styles.clearNonei)
-                                .size(unit(6), unit(6))
-                                .tooltip(Core.bundle.get("feature.chat.ui.schematic.use", "Use"))
-                                .children(() -> icon(Icon.play).size(unit(5), unit(5)));
+                                .props(style(Styles.clearNonei), size(unit(6), unit(6)), prefWidth(unit(6)), prefHeight(unit(6)), tooltip(Core.bundle.get("feature.chat.ui.schematic.use", "Use")))
+                                .children(() -> icon(Icon.play).props(size(unit(5), unit(5)), prefWidth(unit(5)), prefHeight(unit(5))));
                     });
                 });
             });
@@ -803,21 +813,17 @@ dynamic(roomSignal, room -> {
                     ? Core.bundle.get("feature.chat.ui.command.schematic.open", "Open Schematic Browser")
                     : Core.bundle.get("feature.chat.ui.command.map.open", "Open Map Browser");
 
-            card().name("command-card").growX().top().left().height(ChatMessageHeightCalculator.COMMAND_CARD_HEIGHT)
+            card().name("command-card").props(growX(), height(ChatMessageHeightCalculator.COMMAND_CARD_HEIGHT), prefHeight(ChatMessageHeightCalculator.COMMAND_CARD_HEIGHT), top(), left())
                     .children(() -> {
-                        column().growX().top().left().gap(unit(1)).children(() -> {
-                            row().growX().top().left().gap(unit(1)).children(() -> {
-                                icon(schematic ? Icon.paste : Icon.map).size(unit(5), unit(5)).color(Pal.accent);
+                        column().props(growX(), top(), left(), gap(unit(1))).children(() -> {
+                            row().props(growX(), top(), left(), gap(unit(1))).children(() -> {
+                                icon(schematic ? Icon.paste : Icon.map).props(size(unit(5), unit(5)), prefWidth(unit(5)), prefHeight(unit(5)), color(Pal.accent));
                                 text(title)
-                                        .color(Pal.accent)
-                                        .ellipsis()
-                                        .left();
+                                        .props(color(Pal.accent), ellipsis(true), left());
                             });
-                            row().growX().top().left().children(() -> {
+                            row().props(growX(), top(), left()).children(() -> {
                                 button(openLabel, () -> openCommandBrowser(kind))
-                                        .style(WebStyles.secondary())
-                                        .growX()
-                                        .height(unit(11));
+                                        .props(style(WebStyles.secondary()), growX(), height(unit(11)), prefHeight(unit(11)));
                             });
                         });
                     });
@@ -839,7 +845,7 @@ dynamic(roomSignal, room -> {
 
         private Component buildMessageText(String messageText, Readable<Color> bodyColor) {
             if (messageText == null || messageText.isEmpty()) {
-                return text("").color(bodyColor).fontScale(1.0f).left().wrap().growX();
+                return text("").props(color(bodyColor), fontScale(1.0f), left(), textWrap(true), growX());
             }
 
             Matcher m = URL_PATTERN.matcher(messageText);
@@ -858,18 +864,13 @@ dynamic(roomSignal, room -> {
             }
 
             if (urls.isEmpty()) {
-                return text(messageText).color(bodyColor).fontScale(1.0f).left().wrap().growX();
+                return text(messageText).props(color(bodyColor), fontScale(1.0f), left(), textWrap(true), growX());
             }
 
-            // Bare link fast path: the whole message is one clickable link.
             if (urls.size() == 1 && messageText.trim().equals(urls.get(0))) {
                 final String onlyUrl = urls.get(0);
                 Text linkText = text(onlyUrl)
-                        .color(WebStyles.Colors.PRIMARY)
-                        .fontScale(1.0f)
-                        .left()
-                        .wrap()
-                        .growX();
+                        .props(color(WebStyles.Colors.PRIMARY), fontScale(1.0f), left(), textWrap(true), growX());
                 linkText.label().addListener(new ClickListener() {
                     @Override
                     public void clicked(InputEvent event, float x, float y) {
@@ -885,19 +886,14 @@ dynamic(roomSignal, room -> {
             }
             final String highlighted = marked.toString();
             final List<String> linkUrls = new ArrayList<>(urls);
-            return column().growX().top().left().children(() -> {
-                text(highlighted).color(bodyColor).fontScale(1.0f).left().wrap().growX();
+            return column().props(growX(), top(), left()).children(() -> {
+                text(highlighted).props(color(bodyColor), fontScale(1.0f), left(), textWrap(true), growX());
 
-                // Clickable link chips below the text; the inline label itself is not
-                // clickable.
-                row().growX().top().left().gap(unit(1)).children(() -> {
+                row().props(growX(), top(), left(), gap(unit(1))).children(() -> {
                     for (String linkUrl : linkUrls) {
                         final String chipUrl = linkUrl;
                         Text chip = text(chipUrl)
-                                .color(WebStyles.Colors.PRIMARY)
-                                .fontScale(0.85f)
-                                .ellipsis()
-                                .left();
+                                .props(color(WebStyles.Colors.PRIMARY), fontScale(0.85f), ellipsis(true), left());
                         chip.label().addListener(new ClickListener() {
                             @Override
                             public void clicked(InputEvent event, float x, float y) {
@@ -911,23 +907,20 @@ dynamic(roomSignal, room -> {
         }
 
         private void openLinkDialog(String url) {
-            SolimDialog dialog = new SolimDialog(Core.bundle.get("chat.link.dialog.title"));
+            SolimDialog dialog = new SolimDialog(Core.bundle.get("feature.chat.link.dialog.title"));
             dialog.addCloseButton();
             dialog.maxWidth(400f);
             dialog.children(() -> {
-                column().growX().padding(unit(3)).gap(unit(2)).children(() -> {
-                    text(Core.bundle.format("chat.link.dialog.prompt", url))
-                            .wrap()
-                            .growX()
-                            .left();
-                    row().gap(unit(1)).children(() -> {
-                        button(Core.bundle.get("chat.link.dialog.cancel"), dialog::hide)
-                                .style(Styles.defaultt)
-                                .height(unit(7));
-                        button(Core.bundle.get("chat.link.dialog.open"), () -> {
+                column().props(growX(), padding(unit(3)), gap(unit(2))).children(() -> {
+                    text(Core.bundle.format("feature.chat.link.dialog.prompt", url))
+                            .props(textWrap(true), growX(), left());
+                    row().props(gap(unit(1))).children(() -> {
+                        button(Core.bundle.get("feature.chat.link.dialog.cancel"), dialog::hide)
+                                .props(style(Styles.defaultt), height(unit(7)), prefHeight(unit(7)));
+                        button(Core.bundle.get("feature.chat.link.dialog.open"), () -> {
                             Core.app.openURI(url);
                             dialog.hide();
-                        }).style(Styles.defaultb).height(unit(7));
+                        }).props(style(Styles.defaultb), height(unit(7)), prefHeight(unit(7)));
                     });
                 });
             });
@@ -939,7 +932,7 @@ dynamic(roomSignal, room -> {
                 Vars.ui.schematics.showInfo(schematic);
             } else {
                 if (!Vars.state.rules.schematicsAllowed) {
-                    Vars.ui.showInfo(Core.bundle.get("schematic.disabled", "Schematics are disabled."));
+                    Vars.ui.showInfo(Core.bundle.get("schematic.disabled"));
                 } else {
                     Vars.control.input.useSchematic(schematic);
                 }
@@ -961,4 +954,3 @@ dynamic(roomSignal, room -> {
         }
     }
 }
-

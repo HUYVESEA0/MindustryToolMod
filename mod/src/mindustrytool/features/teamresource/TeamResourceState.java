@@ -3,6 +3,7 @@ package mindustrytool.features.teamresource;
 import arc.func.Cons;
 import arc.graphics.Color;
 import arc.struct.ObjectIntMap;
+import arc.struct.ObjectMap;
 import arc.struct.ObjectSet;
 import arc.struct.Seq;
 import arc.util.Interval;
@@ -22,14 +23,13 @@ import mindustry.gen.Groups;
 
 import java.util.Comparator;
 
-/**
- * Encapsulates game logic and state for tracking team resources, flow rates, units, and power grids.
- * Provides reactive signals for Solim UI bindings.
- */
 public class TeamResourceState {
     private final ObjectSet<Item> usedItems = new ObjectSet<>();
     private final ObjectSet<UnitType> usedUnits = new ObjectSet<>();
-    private final Interval timer = new Interval(2);
+    private final Interval timer = new Interval(3);
+    private final ObjectMap<Item, HistoryBuffer> itemHistories = new ObjectMap<>();
+    private final ObjectMap<PowerGraph, HistoryBuffer> graphHistories = new ObjectMap<>();
+    private final HistoryBuffer totalPowerHistory = new HistoryBuffer();
 
     private @Nullable TeamResourceFeature feature;
     private @Nullable Team selectedTeam;
@@ -40,6 +40,11 @@ public class TeamResourceState {
     private boolean viewingStats = false;
     private boolean holdingForStats = false;
     private final Seq<PowerGraph> teamGraphs = new Seq<>();
+    private final ObjectIntMap<UnitType> lastUnitCounts = new ObjectIntMap<>();
+    private int lastBuildingCount = -1;
+    private float lastTotalBalance = 0f;
+    private float lastTotalStored = 0f;
+    private float lastTotalCapacity = 0f;
 
     private final Seq<Team> tempTeams = new Seq<>();
     private final ObjectSet<PowerGraph> tempPowerGraphs = new ObjectSet<>();
@@ -107,6 +112,12 @@ public class TeamResourceState {
         usedUnitsSignal.set(new Seq<>());
         lastSnapshot.clear();
         rateDisplay.clear();
+        lastUnitCounts.clear();
+        lastBuildingCount = -1;
+        lastTotalBalance = 0f;
+        lastTotalStored = 0f;
+        lastTotalCapacity = 0f;
+        clearHistory();
         if (Vars.player != null && Vars.player.team() != null) {
             selectedTeam = Vars.player.team();
             selectedTeamSignal.set(selectedTeam);
@@ -126,7 +137,7 @@ public class TeamResourceState {
     public boolean update() {
         boolean changed = false;
 
-        if (selectedTeam == null || !selectedTeam.active()) {
+        if (selectedTeam == null || (Vars.state != null && !selectedTeam.active())) {
             if (Vars.player != null && Vars.player.team() != null) {
                 selectedTeam = Vars.player.team();
                 selectedTeamSignal.set(selectedTeam);
@@ -138,50 +149,22 @@ public class TeamResourceState {
             updateValidTeams();
         }
 
-        coreItems = (selectedTeam != null && Vars.state != null && selectedTeam.core() != null) ? selectedTeam.core().items : null;
-        if (coreItems != null && Vars.content != null) {
-            boolean itemsChanged = false;
-            for (Item item : Vars.content.items()) {
-                if (coreItems.get(item) > 0 && usedItems.add(item)) {
-                    itemsChanged = true;
-                    changed = true;
-                }
-            }
-            if (itemsChanged) {
-                Seq<Item> list = new Seq<>();
-                for (Item item : Vars.content.items()) {
-                    if (usedItems.contains(item)) {
-                        list.add(item);
-                    }
-                }
-                usedItemsSignal.set(list);
-            }
-        }
-
-        if (selectedTeam != null && Vars.content != null && Vars.state != null) {
-            boolean unitsChanged = false;
-            for (UnitType unit : Vars.content.units()) {
-                try {
-                    if (selectedTeam.data() != null && selectedTeam.data().countType(unit) > 0 && usedUnits.add(unit)) {
-                        unitsChanged = true;
-                        changed = true;
-                    }
-                } catch (Throwable ignored) {
-                }
-            }
-            if (unitsChanged) {
-                Seq<UnitType> list = new Seq<>();
-                for (UnitType unit : Vars.content.units()) {
-                    if (usedUnits.contains(unit)) {
-                        list.add(unit);
-                    }
-                }
-                usedUnitsSignal.set(list);
-            }
-        }
+        coreItems = (selectedTeam != null && Vars.state != null && selectedTeam.core() != null)
+                ? selectedTeam.core().items
+                : null;
 
         if (timer.get(0, 30f)) {
-            updateRates();
+            if (updateCoreItems()) {
+                changed = true;
+            }
+
+            if (updateUnitCounts()) {
+                changed = true;
+            }
+
+            if (updateRates()) {
+                changed = true;
+            }
 
             boolean showPower = feature == null || Boolean.TRUE.equals(feature.showPowerConfig.get());
             if (showPower) {
@@ -189,13 +172,88 @@ public class TeamResourceState {
                     changed = true;
                 }
             }
-            changed = true;
+        }
+
+        if (timer.get(2, 60f)) {
+            sampleHistory();
         }
 
         if (changed) {
             tickSignal.set(tickSignal.get() + 1);
         }
 
+        return changed;
+    }
+
+    private boolean updateCoreItems() {
+        if (coreItems == null || Vars.content == null) {
+            return false;
+        }
+        boolean itemsChanged = false;
+        Seq<Item> allItems = Vars.content.items();
+        for (int i = 0; i < allItems.size; i++) {
+            Item item = allItems.get(i);
+            int count = coreItems.get(item);
+            if (count > 0 && usedItems.add(item)) {
+                itemsChanged = true;
+                getItemHistory(item);
+            }
+        }
+        if (itemsChanged) {
+            Seq<Item> list = new Seq<>();
+            for (int i = 0; i < allItems.size; i++) {
+                Item item = allItems.get(i);
+                if (usedItems.contains(item)) {
+                    list.add(item);
+                }
+            }
+            usedItemsSignal.set(list);
+            return true;
+        }
+        return false;
+    }
+
+    private boolean updateUnitCounts() {
+        if (selectedTeam == null || Vars.content == null || Vars.state == null) {
+            return false;
+        }
+        boolean changed = false;
+        boolean hideZeroUnits = feature != null && Boolean.TRUE.equals(feature.hideZeroUnitsConfig.get());
+        boolean unitsChanged = false;
+        Seq<UnitType> allUnits = Vars.content.units();
+        for (int i = 0; i < allUnits.size; i++) {
+            UnitType unit = allUnits.get(i);
+            try {
+                int count = selectedTeam.data() != null ? selectedTeam.data().countType(unit) : 0;
+                int prev = lastUnitCounts.get(unit, -1);
+                if (count != prev) {
+                    lastUnitCounts.put(unit, count);
+                    changed = true;
+                }
+                if (count > 0) {
+                    if (usedUnits.add(unit)) {
+                        unitsChanged = true;
+                        changed = true;
+                    }
+                } else if (hideZeroUnits) {
+                    if (usedUnits.remove(unit)) {
+                        unitsChanged = true;
+                        changed = true;
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        if (unitsChanged) {
+            Seq<UnitType> list = new Seq<>();
+            for (int i = 0; i < allUnits.size; i++) {
+                UnitType unit = allUnits.get(i);
+                if (usedUnits.contains(unit)) {
+                    list.add(unit);
+                }
+            }
+            usedUnitsSignal.set(list);
+        }
         return changed;
     }
 
@@ -206,11 +264,14 @@ public class TeamResourceState {
     public void setSelectedTeam(Team team) {
         this.selectedTeam = team;
         this.selectedTeamSignal.set(team);
+        this.usedItems.clear();
+        this.usedItemsSignal.set(new Seq<>());
         this.usedUnits.clear();
         this.usedUnitsSignal.set(new Seq<>());
         lastSnapshot.clear();
         rateDisplay.clear();
         this.teamGraphs.clear();
+        clearHistory();
         tickSignal.set(tickSignal.get() + 1);
     }
 
@@ -252,6 +313,9 @@ public class TeamResourceState {
     }
 
     public int getItemAmount(Item item) {
+        if (coreItems == null && selectedTeam != null && Vars.state != null && selectedTeam.core() != null) {
+            coreItems = selectedTeam.core().items;
+        }
         return coreItems != null ? coreItems.get(item) : 0;
     }
 
@@ -259,30 +323,60 @@ public class TeamResourceState {
         return rateDisplay.get(item, 0);
     }
 
+    public static String formatCompactAmount(long amount) {
+        if (amount == Long.MIN_VALUE) {
+            return "-9.2E";
+        }
+        boolean negative = amount < 0;
+        long abs = negative ? -amount : amount;
+        if (abs < 0) {
+            abs = Long.MAX_VALUE;
+        }
+
+        String result;
+        if (abs < 1000) {
+            result = String.valueOf(abs);
+        } else if (abs < 10000) {
+            long fractional = (abs % 1000) / 100;
+            result = (abs / 1000) + "." + fractional + "k";
+        } else if (abs < 1000000) {
+            result = (abs / 1000) + "k";
+        } else if (abs < 10000000) {
+            long fractional = (abs % 1000000) / 100000;
+            result = (abs / 1000000) + "." + fractional + "M";
+        } else if (abs < 1000000000) {
+            result = (abs / 1000000) + "M";
+        } else {
+            result = (abs / 1000000000) + "B";
+        }
+        return negative ? "-" + result : result;
+    }
+
     public String getFormattedAmount(Item item) {
         if (coreItems == null) {
             return "0";
         }
-        return UI.formatAmount(coreItems.get(item));
+        return formatCompactAmount(coreItems.get(item));
     }
 
     public String getFormattedRate(Item item) {
-        if (rateDisplay == null) {
-            return "0/s";
-        }
-        int rate = rateDisplay.get(item);
+        int rate = rateDisplay.get(item, 0);
         if (rate == 0) {
             return "0/s";
         }
-        String prefix = rate > 0 ? "+" : "";
-        return prefix + rate + "/s";
+        return (rate > 0 ? "+" : "") + formatCompactAmount(rate);
+    }
+
+    public String getFullFormattedRate(Item item) {
+        int rate = rateDisplay.get(item, 0);
+        if (rate == 0) {
+            return "0/s";
+        }
+        return (rate > 0 ? "+" : "") + rate + "/s";
     }
 
     public Color getRateColor(Item item) {
-        if (rateDisplay == null) {
-            return Color.gray;
-        }
-        int rate = rateDisplay.get(item);
+        int rate = rateDisplay.get(item, 0);
         if (rate > 0) {
             return Pal.heal;
         }
@@ -302,16 +396,77 @@ public class TeamResourceState {
         }
         try {
             int count = current.data() != null ? current.data().countType(type) : 0;
-            return count > 0 ? UI.formatAmount(count) : "";
+            return count > 0 ? formatCompactAmount(count) : "";
         } catch (Throwable t) {
             return "";
         }
     }
 
+    public HistoryBuffer getItemHistory(Item item) {
+        HistoryBuffer history = itemHistories.get(item);
+        if (history == null) {
+            history = new HistoryBuffer();
+            if (coreItems == null && selectedTeam != null && Vars.state != null && selectedTeam.core() != null) {
+                coreItems = selectedTeam.core().items;
+            }
+            if (coreItems != null) {
+                history.add(coreItems.get(item));
+            }
+            itemHistories.put(item, history);
+        }
+        return history;
+    }
+
+    public @Nullable HistoryBuffer getPowerGraphHistory(PowerGraph graph) {
+        return graphHistories.get(graph);
+    }
+
+    public HistoryBuffer getTotalPowerHistory() {
+        return totalPowerHistory;
+    }
+
+    public void clearHistory() {
+        for (HistoryBuffer buffer : itemHistories.values()) {
+            buffer.clear();
+        }
+        itemHistories.clear();
+        for (HistoryBuffer buffer : graphHistories.values()) {
+            buffer.clear();
+        }
+        graphHistories.clear();
+        totalPowerHistory.clear();
+    }
+
+    private void sampleHistory() {
+        if (Vars.state == null || selectedTeam == null) {
+            return;
+        }
+        Seq<Item> items = usedItemsSignal.get();
+        if (items != null) {
+            for (int i = 0; i < items.size; i++) {
+                Item item = items.get(i);
+                HistoryBuffer history = getItemHistory(item);
+                history.add(coreItems != null ? coreItems.get(item) : 0f);
+            }
+        }
+
+        totalPowerHistory.add(getTotalStoredPower());
+
+        for (int i = 0; i < teamGraphs.size; i++) {
+            PowerGraph graph = teamGraphs.get(i);
+            HistoryBuffer history = graphHistories.get(graph);
+            if (history == null) {
+                history = new HistoryBuffer();
+                graphHistories.put(graph, history);
+            }
+            history.add(graph.getLastPowerStored());
+        }
+    }
+
     public float getTotalPowerBalance() {
         float total = 0f;
-        for (PowerGraph graph : teamGraphs) {
-            total += graph.getPowerBalance();
+        for (int i = 0; i < teamGraphs.size; i++) {
+            total += teamGraphs.get(i).getPowerBalance();
         }
         return total;
     }
@@ -327,16 +482,16 @@ public class TeamResourceState {
 
     public float getTotalStoredPower() {
         float total = 0f;
-        for (PowerGraph graph : teamGraphs) {
-            total += graph.getLastPowerStored();
+        for (int i = 0; i < teamGraphs.size; i++) {
+            total += teamGraphs.get(i).getLastPowerStored();
         }
         return total;
     }
 
     public float getTotalPowerCapacity() {
         float total = 0f;
-        for (PowerGraph graph : teamGraphs) {
-            total += graph.getLastCapacity();
+        for (int i = 0; i < teamGraphs.size; i++) {
+            total += teamGraphs.get(i).getLastCapacity();
         }
         return total;
     }
@@ -377,26 +532,45 @@ public class TeamResourceState {
         }
     }
 
-    private void updateRates() {
+    private boolean updateRates() {
         if (coreItems == null || Vars.content == null) {
-            return;
+            if (rateDisplay.size > 0) {
+                rateDisplay.clear();
+                return true;
+            }
+            return false;
         }
 
+        boolean ratesOrAmountsChanged = false;
+        Seq<Item> allItems = Vars.content.items();
         if (lastSnapshot.size > 0) {
-            for (Item item : Vars.content.items()) {
+            for (int i = 0; i < allItems.size; i++) {
+                Item item = allItems.get(i);
                 if (item != null) {
                     int amount = coreItems.get(item);
                     int previous = lastSnapshot.get(item, amount);
-                    rateDisplay.put(item, (amount - previous) * 2);
+                    if (amount != previous) {
+                        ratesOrAmountsChanged = true;
+                    }
+                    int newRate = (amount - previous) * 2;
+                    int oldRate = rateDisplay.get(item, 0);
+                    if (newRate != oldRate) {
+                        ratesOrAmountsChanged = true;
+                        rateDisplay.put(item, newRate);
+                    }
                 }
             }
+        } else {
+            ratesOrAmountsChanged = true;
         }
         lastSnapshot.clear();
-        for (Item item : Vars.content.items()) {
+        for (int i = 0; i < allItems.size; i++) {
+            Item item = allItems.get(i);
             if (item != null) {
                 lastSnapshot.put(item, coreItems.get(item));
             }
         }
+        return ratesOrAmountsChanged;
     }
 
     private boolean updatePowerStats() {
@@ -404,19 +578,40 @@ public class TeamResourceState {
             return false;
         }
 
-        tempPowerGraphs.clear();
-        if (Groups.build != null) {
-            Groups.build.each(powerGraphCollector);
+        boolean graphsChanged = false;
+        int currentBuildCount = Groups.build != null ? Groups.build.size() : 0;
+        if (currentBuildCount != lastBuildingCount) {
+            lastBuildingCount = currentBuildCount;
+            tempPowerGraphs.clear();
+            if (Groups.build != null) {
+                Groups.build.each(powerGraphCollector);
+            }
+
+            tempGraphSeq.clear();
+            for (PowerGraph graph : tempPowerGraphs) {
+                tempGraphSeq.add(graph);
+            }
+            tempGraphSeq.sort(GRAPH_COMPARATOR);
+
+            if (!tempGraphSeq.equals(teamGraphs)) {
+                teamGraphs.set(new Seq<>(tempGraphSeq));
+                graphsChanged = true;
+            }
         }
 
-        tempGraphSeq.clear();
-        for (PowerGraph graph : tempPowerGraphs) {
-            tempGraphSeq.add(graph);
-        }
-        tempGraphSeq.sort(GRAPH_COMPARATOR);
+        float balance = getTotalPowerBalance();
+        float stored = getTotalStoredPower();
+        float cap = getTotalPowerCapacity();
 
-        if (!tempGraphSeq.equals(teamGraphs)) {
-            teamGraphs.set(new Seq<>(tempGraphSeq));
+        boolean statsChanged = graphsChanged
+                || Math.abs(balance - lastTotalBalance) > 0.01f
+                || (long) stored != (long) lastTotalStored
+                || (long) cap != (long) lastTotalCapacity;
+
+        if (statsChanged) {
+            lastTotalBalance = balance;
+            lastTotalStored = stored;
+            lastTotalCapacity = cap;
             return true;
         }
         return false;

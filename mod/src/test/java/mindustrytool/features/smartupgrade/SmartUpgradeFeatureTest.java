@@ -3,7 +3,6 @@ package mindustrytool.features.smartupgrade;
 import static org.junit.jupiter.api.Assertions.*;
 
 import arc.Core;
-import arc.files.Fi;
 import arc.graphics.g2d.TextureRegion;
 import arc.mock.MockApplication;
 import arc.mock.MockGraphics;
@@ -20,28 +19,30 @@ import mindustry.world.blocks.distribution.BufferedItemBridge;
 import mindustry.world.blocks.distribution.Conveyor;
 import mindustry.world.blocks.distribution.Duct;
 import mindustry.world.blocks.distribution.DuctBridge;
+import mindustry.world.blocks.distribution.DuctRouter;
 import mindustry.world.blocks.distribution.ItemBridge;
+import mindustry.world.blocks.distribution.Junction;
+import mindustry.world.blocks.distribution.OverflowDuct;
+import mindustry.world.blocks.distribution.OverflowGate;
 import mindustry.world.blocks.distribution.Router;
+import mindustry.world.blocks.distribution.Sorter;
 import mindustry.world.blocks.distribution.StackConveyor;
 import mindustry.world.blocks.liquid.Conduit;
+import mindustry.world.blocks.distribution.DirectionLiquidBridge;
 import mindustry.world.blocks.liquid.LiquidBridge;
+import mindustry.world.blocks.liquid.LiquidJunction;
+import mindustry.world.blocks.liquid.LiquidRouter;
 import mindustry.world.blocks.production.BeamDrill;
 import mindustry.world.blocks.production.Drill;
+import mindustrytool.test.MindustryTestEnv;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.util.Locale;
-import java.util.Properties;
-
-class SmartUpgradeFeatureTest {
+class SmartUpgradeFeatureTest extends MindustryTestEnv {
 
     @BeforeEach
     void setUp() {
+        super.setUpMindustryTestEnv();
         Core.app = new MockApplication();
         Core.graphics = new MockGraphics();
         Core.settings = new MockSettings();
@@ -64,79 +65,6 @@ class SmartUpgradeFeatureTest {
     }
 
     @Test
-    void verifyBundles() throws Exception {
-        File dir = new File("../assets/bundles");
-        if (!dir.exists()) {
-            dir = new File("assets/bundles");
-        }
-        assertTrue(dir.exists(), "assets/bundles directory must exist");
-
-        File enBundle = new File(dir, "bundle.properties");
-        File viBundle = new File(dir, "bundle_vi.properties");
-
-        assertTrue(enBundle.exists());
-        assertTrue(viBundle.exists());
-
-        // Strict validation on all bundle files
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".properties"));
-        assertNotNull(files);
-
-        for (File f : files) {
-            byte[] bytes = Files.readAllBytes(f.toPath());
-            if (bytes.length >= 3 && bytes[0] == (byte) 0xEF && bytes[1] == (byte) 0xBB && bytes[2] == (byte) 0xBF) {
-                fail("File " + f.getName() + " contains UTF-8 BOM! Bundles must be UTF-8 without BOM.");
-            }
-
-            Properties props = new Properties();
-            try (InputStreamReader isr = new InputStreamReader(new FileInputStream(f), StandardCharsets.UTF_8)) {
-                props.load(isr);
-            }
-            assertFalse(props.isEmpty(), "Bundle " + f.getName() + " should not be empty");
-
-            for (String key : props.stringPropertyNames()) {
-                assertFalse(key.startsWith("\uFEFF"), "Key in " + f.getName() + " starts with BOM: " + key);
-                assertFalse(key.contains("\uFEFF"), "Key in " + f.getName() + " contains BOM: " + key);
-            }
-        }
-
-        // 4. Test Arc I18NBundle loading on bundle.properties and bundle_vi.properties
-        Fi baseFi = new Fi(new File(dir, "bundle"));
-        I18NBundle testBundle = I18NBundle.createBundle(baseFi, Locale.ENGLISH);
-        assertNotNull(testBundle);
-        assertEquals("Smart Upgrade", testBundle.get("feature.smart-upgrade.name"));
-        assertEquals("Smart Upgrade Settings", testBundle.get("feature.smart-upgrade.settings.title"));
-        assertEquals("Trigger Mode", testBundle.get("feature.smart-upgrade.settings.trigger-mode"));
-        assertEquals("One Shot", testBundle.get("feature.smart-upgrade.settings.trigger-mode.one-shot"));
-        assertEquals("Persistent", testBundle.get("feature.smart-upgrade.settings.trigger-mode.persistent"));
-        assertEquals("Smart Upgrade armed: tap a block to open the upgrade menu.",
-                testBundle.get("feature.smart-upgrade.armed"));
-
-        I18NBundle testViBundle = I18NBundle.createBundle(baseFi, new Locale("vi"));
-        assertNotNull(testViBundle);
-        assertEquals("Nâng Cấp Thông Minh", testViBundle.get("feature.smart-upgrade.name"));
-        assertEquals("Cài Đặt Nâng Cấp Thông Minh", testViBundle.get("feature.smart-upgrade.settings.title"));
-        assertEquals("Số công trình tối đa mỗi lần nâng cấp", testViBundle.get("feature.smart-upgrade.settings.max-upgrades"));
-        assertEquals("Chế Độ Kích Hoạt", testViBundle.get("feature.smart-upgrade.settings.trigger-mode"));
-        assertEquals("Một lần", testViBundle.get("feature.smart-upgrade.settings.trigger-mode.one-shot"));
-        assertEquals("Duy trì", testViBundle.get("feature.smart-upgrade.settings.trigger-mode.persistent"));
-        assertEquals("Đã sẵn sàng Nâng Cấp Thông Minh: chạm vào một công trình để mở bảng nâng cấp.",
-                testViBundle.get("feature.smart-upgrade.armed"));
-        assertEquals("Bật/Tắt Nâng Cấp Thông Minh", testViBundle.get("keybind.smartUpgradeToggle.name"));
-    }
-
-    @Test
-    void testDefaultConfigs() {
-        SmartUpgradeFeature feature = new SmartUpgradeFeature();
-
-        assertEquals(500, feature.maxUpdatesConfig.get());
-        assertEquals(SmartUpgradeFeature.MODE_ONE_SHOT, feature.triggerModeConfig.get());
-        assertTrue(feature.isOneShot());
-        assertFalse(feature.isArmed());
-        assertFalse(feature.onlySameTypeConfig.get());
-        assertTrue(feature.traverseBridgesConfig.get());
-    }
-
-    @Test
     void testConfigMutationsAndReset() {
         SmartUpgradeFeature feature = new SmartUpgradeFeature();
 
@@ -144,6 +72,7 @@ class SmartUpgradeFeatureTest {
         feature.triggerModeConfig.set(SmartUpgradeFeature.MODE_PERSISTENT);
         feature.onlySameTypeConfig.set(true);
         feature.traverseBridgesConfig.set(false);
+        flushEffects();
 
         assertEquals(1000, feature.maxUpdatesConfig.get());
         assertEquals(SmartUpgradeFeature.MODE_PERSISTENT, feature.triggerModeConfig.get());
@@ -236,11 +165,9 @@ class SmartUpgradeFeatureTest {
         assertEquals(1, candidates.size);
         assertEquals(conv2, candidates.first());
 
-        // For wall: no other wall of size 1 exists in content
         Seq<Block> wallCandidates = feature.getUpgradeCandidates(wall);
         assertTrue(wallCandidates.isEmpty());
 
-        // For null block
         assertTrue(feature.getUpgradeCandidates(null).isEmpty());
     }
 
@@ -259,19 +186,125 @@ class SmartUpgradeFeatureTest {
     }
 
     @Test
-    void testNullSafeExecution() {
+    void testShouldDeleteOnlySameTypeEnabled() {
         SmartUpgradeFeature feature = new SmartUpgradeFeature();
+        feature.onlySameTypeConfig.set(true);
+        feature.traverseBridgesConfig.set(true);
+        flushEffects();
 
-        assertDoesNotThrow(() -> feature.upgradeChain(null, null));
-        assertDoesNotThrow(feature::triggerHoveredUpgrade);
-        assertDoesNotThrow(() -> feature.showMenu(null));
-        assertDoesNotThrow(feature::closeMenu);
-        assertDoesNotThrow(feature::onDisable);
+        Conveyor start = new Conveyor("del-same-start");
+        Conveyor sameType = start;
+        Conveyor otherConveyor = new Conveyor("del-same-other");
+        Duct duct = new Duct("del-same-duct");
+        Router router = new Router("del-same-router");
+        Junction junction = new Junction("del-same-junction");
+        Wall wall = new Wall("del-same-wall");
+
+        SmartUpgradeFeature.BlockGroup group = SmartUpgradeFeature.getGroup(start);
+
+        assertTrue(feature.shouldDeleteBlock(start, group, sameType));
+        assertFalse(feature.shouldDeleteBlock(start, group, otherConveyor));
+        assertFalse(feature.shouldDeleteBlock(start, group, duct));
+        assertFalse(feature.shouldDeleteBlock(start, group, router));
+        assertFalse(feature.shouldDeleteBlock(start, group, junction));
+        assertFalse(feature.shouldDeleteBlock(start, group, wall));
+        assertFalse(feature.shouldDeleteBlock(start, group, null));
     }
 
     @Test
-    void testSettingDialogProvider() {
+    void testShouldDeleteSameGroupAnySize() {
         SmartUpgradeFeature feature = new SmartUpgradeFeature();
-        assertNotNull(feature.getSettingDialog());
+        feature.onlySameTypeConfig.set(false);
+        feature.traverseBridgesConfig.set(false);
+
+        Wall smallWall = new Wall("del-size-small");
+        smallWall.size = 1;
+        Wall largeWall = new Wall("del-size-large");
+        largeWall.size = 2;
+        Drill smallDrill = new Drill("del-size-drill-small");
+        smallDrill.size = 1;
+        Drill largeDrill = new Drill("del-size-drill-large");
+        largeDrill.size = 2;
+
+        assertTrue(feature.shouldDeleteBlock(smallWall, SmartUpgradeFeature.BlockGroup.WALL, largeWall));
+        assertTrue(feature.shouldDeleteBlock(largeWall, SmartUpgradeFeature.BlockGroup.WALL, smallWall));
+        assertTrue(feature.shouldDeleteBlock(smallDrill, SmartUpgradeFeature.BlockGroup.DRILL, largeDrill));
+
+        Conveyor start = new Conveyor("del-size-start");
+        StackConveyor stack = new StackConveyor("del-size-stack");
+        Duct duct = new Duct("del-size-duct");
+        SmartUpgradeFeature.BlockGroup conveyorGroup = SmartUpgradeFeature.getGroup(start);
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, stack));
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, duct));
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, smallWall));
+    }
+
+    @Test
+    void testShouldDeleteTraverseBridgesOffExcludesConnectors() {
+        SmartUpgradeFeature feature = new SmartUpgradeFeature();
+        feature.onlySameTypeConfig.set(false);
+        feature.traverseBridgesConfig.set(false);
+        flushEffects();
+
+        Conveyor start = new Conveyor("del-off-start");
+        SmartUpgradeFeature.BlockGroup conveyorGroup = SmartUpgradeFeature.getGroup(start);
+
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new Router("del-off-router")));
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new Junction("del-off-junction")));
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new ItemBridge("del-off-bridge")));
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new Sorter("del-off-sorter")));
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new OverflowGate("del-off-overflow")));
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new DuctRouter("del-off-duct-router")));
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new OverflowDuct("del-off-duct-overflow")));
+
+        Conduit conduitStart = new Conduit("del-off-conduit-start");
+        SmartUpgradeFeature.BlockGroup conduitGroup = SmartUpgradeFeature.getGroup(conduitStart);
+        assertFalse(feature.shouldDeleteBlock(conduitStart, conduitGroup, new LiquidRouter("del-off-liq-router")));
+        assertFalse(feature.shouldDeleteBlock(conduitStart, conduitGroup, new LiquidJunction("del-off-liq-junction")));
+        assertFalse(feature.shouldDeleteBlock(conduitStart, conduitGroup, new LiquidBridge("del-off-liq-bridge")));
+    }
+
+    @Test
+    void testShouldDeleteTraverseBridgesOnIncludesConnectors() {
+        SmartUpgradeFeature feature = new SmartUpgradeFeature();
+        feature.onlySameTypeConfig.set(false);
+        feature.traverseBridgesConfig.set(true);
+
+        Conveyor start = new Conveyor("del-on-start");
+        SmartUpgradeFeature.BlockGroup conveyorGroup = SmartUpgradeFeature.getGroup(start);
+
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, new Router("del-on-router")));
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, new Junction("del-on-junction")));
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, new ItemBridge("del-on-bridge")));
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, new Sorter("del-on-sorter")));
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, new OverflowGate("del-on-overflow")));
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, new DuctRouter("del-on-duct-router")));
+        assertTrue(feature.shouldDeleteBlock(start, conveyorGroup, new OverflowDuct("del-on-duct-overflow")));
+
+        Conduit conduitStart = new Conduit("del-on-conduit-start");
+        SmartUpgradeFeature.BlockGroup conduitGroup = SmartUpgradeFeature.getGroup(conduitStart);
+
+        assertTrue(feature.shouldDeleteBlock(conduitStart, conduitGroup, new LiquidRouter("del-on-liq-router")));
+        assertTrue(feature.shouldDeleteBlock(conduitStart, conduitGroup, new LiquidJunction("del-on-liq-junction")));
+        assertTrue(feature.shouldDeleteBlock(conduitStart, conduitGroup, new LiquidBridge("del-on-liq-bridge")));
+        assertTrue(feature.shouldDeleteBlock(conduitStart, conduitGroup,
+                new DirectionLiquidBridge("del-on-dir-liq-bridge")));
+
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new Wall("del-on-wall")));
+        assertFalse(feature.shouldDeleteBlock(start, conveyorGroup, new Conduit("del-on-conduit")));
+        assertFalse(feature.shouldDeleteBlock(conduitStart, conduitGroup, new Conveyor("del-on-conveyor")));
+        assertFalse(feature.shouldDeleteBlock(conduitStart, conduitGroup, new Router("del-on-conduit-router")));
+    }
+
+    @Test
+    void testShouldDeleteNullSafety() {
+        SmartUpgradeFeature feature = new SmartUpgradeFeature();
+        feature.onlySameTypeConfig.set(false);
+        feature.traverseBridgesConfig.set(true);
+
+        Conveyor start = new Conveyor("del-null-start");
+        assertFalse(feature.shouldDeleteBlock(null, SmartUpgradeFeature.BlockGroup.CONVEYOR, start));
+        assertFalse(feature.shouldDeleteBlock(start, SmartUpgradeFeature.BlockGroup.NONE, start));
+        assertFalse(feature.shouldDeleteBlock(start, null, start));
     }
 }

@@ -19,14 +19,13 @@ import mindustry.Vars;
 import mindustry.game.EventType.TapEvent;
 import mindustry.core.UI;
 import mindustry.world.Tile;
-import solim.test.SolimEnv;
+import solim.test.ArcTestEnv;
 
-class MapPositionPickerTest extends SolimEnv {
+class MapPositionPickerTest extends ArcTestEnv {
 
     private Application originalApp;
     private UI originalUi;
     private Seq<Runnable> postedTasks;
-
 
     @BeforeEach
     void setUp() {
@@ -36,11 +35,16 @@ class MapPositionPickerTest extends SolimEnv {
         Core.app = new MockApplication() {
             @Override
             public void post(Runnable runnable) {
-                postedTasks.add(runnable);
+                if (runnable instanceof MapPositionPicker.RemoveListenerTask) {
+                    synchronized (postedTasks) {
+                        postedTasks.add(runnable);
+                    }
+                } else {
+                    runnable.run();
+                }
             }
         };
-        // Hermetic: without a live HUD the picker skips the toast path and the
-        // test observes exactly the picker's own posted tasks.
+
         Vars.ui = null;
         MapPositionPicker.cancel();
         drainPostedTasks();
@@ -55,15 +59,18 @@ class MapPositionPickerTest extends SolimEnv {
     }
 
     private void drainPostedTasks() {
-        while (!postedTasks.isEmpty()) {
-            postedTasks.pop().run();
+        synchronized (postedTasks) {
+            while (!postedTasks.isEmpty()) {
+                postedTasks.pop().run();
+            }
         }
     }
 
     @Test
     void pick_invokesOnStartAndTracksListener() {
-        boolean[] started = {false};
-        MapPositionPicker.pick(() -> started[0] = true, (x, y) -> {});
+        boolean[] started = { false };
+        MapPositionPicker.pick(() -> started[0] = true, (x, y) -> {
+        });
 
         assertTrue(started[0]);
         assertNotNull(MapPositionPicker.currentListener);
@@ -71,7 +78,8 @@ class MapPositionPickerTest extends SolimEnv {
 
     @Test
     void cancel_clearsCurrentListenerAndSchedulesRemoval() {
-        MapPositionPicker.pick(null, (x, y) -> {});
+        MapPositionPicker.pick(null, (x, y) -> {
+        });
         assertNotNull(MapPositionPicker.currentListener);
 
         MapPositionPicker.cancel();
@@ -84,28 +92,26 @@ class MapPositionPickerTest extends SolimEnv {
 
     @Test
     void pick_repeatedCallsCancelPreviousListener() {
-        int[] pickedCount = {0};
+        int[] pickedCount = { 0 };
 
         MapPositionPicker.pick(null, (x, y) -> pickedCount[0]++);
         assertEquals(0, pickedCount[0]);
 
-        // Second pick should cancel the first
         MapPositionPicker.pick(null, (x, y) -> pickedCount[0] += 10);
-        assertEquals(1, postedTasks.size); // First listener removal scheduled
+        assertEquals(1, postedTasks.size);
 
         Tile tile = new Tile(10, 20);
         TapEvent event = new TapEvent(null, tile);
 
         Events.fire(event);
 
-        // Only the second callback should have fired (+10)
         assertEquals(10, pickedCount[0]);
     }
 
     @Test
     void tapEvent_executesOnceAndDefersRemoval() {
-        float[] captured = {-1f, -1f};
-        int[] callCount = {0};
+        float[] captured = { -1f, -1f };
+        int[] callCount = { 0 };
 
         MapPositionPicker.pick(null, (x, y) -> {
             captured[0] = x;
@@ -122,13 +128,11 @@ class MapPositionPickerTest extends SolimEnv {
         assertEquals(tile.worldx(), captured[0]);
         assertEquals(tile.worldy(), captured[1]);
         assertNull(MapPositionPicker.currentListener);
-        assertEquals(1, postedTasks.size); // Removal deferred via Core.app.post
+        assertEquals(1, postedTasks.size);
 
-        // Second tap before drain should not fire again
         Events.fire(event);
         assertEquals(1, callCount[0]);
 
-        // After drain, listener is permanently removed from Events
         drainPostedTasks();
         Events.fire(event);
         assertEquals(1, callCount[0]);
@@ -136,18 +140,16 @@ class MapPositionPickerTest extends SolimEnv {
 
     @Test
     void tapEvent_doesNotCorruptEventsFireIterationWithMultipleListeners() {
-        int[] otherListenerCalls = {0};
+        int[] otherListenerCalls = { 0 };
 
-        MapPositionPicker.pick(null, (x, y) -> {});
+        MapPositionPicker.pick(null, (x, y) -> {
+        });
 
-        // Add a secondary listener after MapPositionPicker
         Events.on(TapEvent.class, e -> otherListenerCalls[0]++);
 
         Tile tile = new Tile(1, 2);
         TapEvent event = new TapEvent(null, tile);
 
-        // Events.fire iterates over both listeners. If removal was synchronous,
-        // Arc's cached loop length would trigger a NullPointerException.
         assertDoesNotThrow(() -> Events.fire(event));
 
         assertEquals(1, otherListenerCalls[0]);

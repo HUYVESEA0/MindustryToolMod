@@ -41,9 +41,7 @@ class ChatServiceWatchdogTest extends MindustryTestEnv {
         service.dispose();
         store.dispose();
         QueryCache.getInstance().clear();
-        // Service and store own effects outside any component scope, so they
-        // are caller-managed: dispose above unsubscribes them, flush drains
-        // anything already queued so the env teardown sees an empty dispatcher.
+
         flushEffects();
     }
 
@@ -95,7 +93,8 @@ class ChatServiceWatchdogTest extends MindustryTestEnv {
     void testHandleStreamLineIncomingMessagesUpdatesStateAndConnects() {
         store.session().setConnected(false);
 
-        service.handleStreamLine("data: {\"id\":\"msg_1\",\"channelId\":\"ch1\",\"content\":\"Hello world\"}");
+        service.handleStreamLine(
+                "data: {\"type\":\"message\",\"data\":{\"id\":\"msg_1\",\"channelId\":\"ch1\",\"content\":\"Hello world\"}}");
         service.handleStreamLine("");
 
         assertTrue(store.session().connected().get());
@@ -170,6 +169,8 @@ class ChatServiceWatchdogTest extends MindustryTestEnv {
 
         service.syncActiveChannelSilently("ch1");
 
+        service.stop();
+
         assertFalse(store.messages().isActiveLoadingInitial(),
                 "Silent sync should not trigger full loading screen when messages are cached");
     }
@@ -182,6 +183,8 @@ class ChatServiceWatchdogTest extends MindustryTestEnv {
         assertFalse(store.messages().isActiveLoadingInitial());
 
         service.syncActiveChannelSilently("ch1");
+
+        service.stop();
 
         assertTrue(store.messages().isActiveLoadingInitial(),
                 "Silent sync should set loadingInitial = true when cache is completely empty");
@@ -198,6 +201,8 @@ class ChatServiceWatchdogTest extends MindustryTestEnv {
         service.setLastEventTime(expiredTime);
 
         service.checkConnectionAndReconnect();
+
+        service.stop();
 
         assertTrue(mockReq.isCancelled(), "Stalled stream should be cancelled by reconnect check");
         assertFalse(store.session().connected().get());
@@ -217,11 +222,123 @@ class ChatServiceWatchdogTest extends MindustryTestEnv {
         msg.setCreatedBy("author_123");
         msg.setContent("Test message");
 
-        // Author already in store: no batch fetch issued, user retained
         service.fetchMissingUsers(Collections.singletonList(msg));
 
         UserData found = store.users().getDirect("author_123");
         assertNotNull(found);
         assertEquals("CachedUser", found.getName());
+    }
+
+    @Test
+    void testIncomingMessageWhenFeedNotVisibleIncrementsUnread() {
+
+        ChatService unreadTrackingService = new ChatService(store, channelId -> false);
+        try {
+            String json = "{\"type\":\"message\",\"data\":{\"id\":\"01944800-0000-7000-8000-000000000001\",\"channelId\":\"ch1\",\"content\":\"hello\",\"createdBy\":\"u1\"}}";
+            unreadTrackingService.handleStreamLine("data: " + json);
+            unreadTrackingService.handleStreamLine("");
+
+            assertEquals(1, store.unread().get("ch1"));
+            assertEquals(1, store.unread().forChannel("ch1").get());
+        } finally {
+            unreadTrackingService.stop();
+            unreadTrackingService.dispose();
+        }
+    }
+
+    @Test
+    void testIncomingMessageWhenFeedIsVisibleMarksAsRead() {
+
+        ChatService readService = new ChatService(store, channelId -> "ch1".equals(channelId));
+        try {
+            String json = "{\"type\":\"message\",\"data\":{\"id\":\"01944800-0000-7000-8000-000000000002\",\"channelId\":\"ch1\",\"content\":\"hello2\",\"createdBy\":\"u1\"}}";
+            readService.handleStreamLine("data: " + json);
+            readService.handleStreamLine("");
+
+            assertEquals(0, store.unread().get("ch1"));
+            assertEquals(0, store.unread().forChannel("ch1").get());
+        } finally {
+            readService.stop();
+            readService.dispose();
+        }
+    }
+
+    @Test
+    void testHandleStreamLineDeletionRemovesMessageAndConnects() {
+        ChatMessage msg1 = new ChatMessage();
+        msg1.setId("msg_1");
+        msg1.setChannelId("ch1");
+        msg1.setContent("Message 1");
+        store.messages().append(msg1);
+
+        ChatMessage msg2 = new ChatMessage();
+        msg2.setId("msg_2");
+        msg2.setChannelId("ch1");
+        msg2.setContent("Message 2");
+        store.messages().append(msg2);
+
+        assertEquals(2, store.messages().active().get().size());
+        store.session().setConnected(false);
+
+        service.handleStreamLine("data: {\"type\":\"delete\",\"data\":{\"id\":\"msg_1\",\"channelId\":\"ch1\"}}");
+        service.handleStreamLine("");
+
+        assertTrue(store.session().connected().get());
+        assertEquals(1, store.messages().active().get().size());
+        assertEquals("msg_2", store.messages().active().get().get(0).getId());
+    }
+
+    @Test
+    void testHandleStreamLineDeletionClearsReplyTargetIfTargeted() {
+        ChatMessage msg = new ChatMessage();
+        msg.setId("msg_reply_target");
+        msg.setChannelId("ch1");
+        msg.setContent("To reply");
+        store.messages().append(msg);
+        store.ui().setReplyTarget(msg);
+
+        assertEquals(msg, store.ui().currentReplyTarget());
+
+        service.handleStreamLine(
+                "data: {\"type\":\"delete\",\"data\":{\"id\":\"msg_reply_target\",\"channelId\":\"ch1\"}}");
+        service.handleStreamLine("");
+
+        assertNull(store.ui().currentReplyTarget());
+    }
+
+    @Test
+    void testHandleStreamLineDeletionDoesNotClearDifferentReplyTarget() {
+        ChatMessage msg1 = new ChatMessage();
+        msg1.setId("msg_1");
+        msg1.setChannelId("ch1");
+        msg1.setContent("To delete");
+        store.messages().append(msg1);
+
+        ChatMessage msg2 = new ChatMessage();
+        msg2.setId("msg_2");
+        msg2.setChannelId("ch1");
+        msg2.setContent("To reply");
+        store.messages().append(msg2);
+        store.ui().setReplyTarget(msg2);
+
+        service.handleStreamLine("data: {\"type\":\"delete\",\"data\":{\"id\":\"msg_1\",\"channelId\":\"ch1\"}}");
+        service.handleStreamLine("");
+
+        assertEquals(msg2, store.ui().currentReplyTarget());
+    }
+
+    @Test
+    void testHandleStreamLineDeletionUpdatesLastMessageId() {
+        ChatMessage msg = new ChatMessage();
+        msg.setId("msg_to_delete");
+        msg.setChannelId("ch1");
+        msg.setContent("Will be deleted");
+        store.messages().append(msg);
+
+        service.handleStreamLine(
+                "data: {\"type\":\"delete\",\"data\":{\"id\":\"msg_to_delete\",\"channelId\":\"ch1\",\"lastMessageId\":\"msg_prev\"}}");
+        service.handleStreamLine("");
+
+        assertEquals("msg_prev", store.unread().getLatestMessageId("ch1"));
     }
 }

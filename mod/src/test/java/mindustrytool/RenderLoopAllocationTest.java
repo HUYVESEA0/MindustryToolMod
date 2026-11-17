@@ -1,0 +1,450 @@
+package mindustrytool;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.lang.management.ManagementFactory;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import com.sun.management.ThreadMXBean;
+
+import arc.Core;
+import arc.graphics.Camera;
+import arc.graphics.Color;
+import arc.graphics.Texture;
+import arc.graphics.g2d.Batch;
+import arc.graphics.g2d.Font;
+import arc.graphics.g2d.Font.FontData;
+import arc.graphics.g2d.Font.Glyph;
+import arc.graphics.g2d.TextureRegion;
+import arc.math.Mathf;
+import arc.math.geom.Rect;
+import arc.mock.MockGraphics;
+import arc.scene.Element;
+import arc.scene.Scene;
+import arc.scene.style.TextureRegionDrawable;
+import arc.scene.ui.Label.LabelStyle;
+import mindustry.Vars;
+import mindustry.core.ContentLoader;
+import mindustry.core.GameState;
+import mindustry.core.GameState.State;
+import mindustry.core.UI;
+import mindustry.game.Rules;
+import mindustry.gen.Tex;
+import mindustry.ui.Fonts;
+import mindustry.ui.Styles;
+import mindustry.ui.fragments.HudFragment;
+import mindustrytool.features.teamresource.SplitBar;
+import mindustrytool.features.teamresource.TeamResourceFeature;
+import mindustrytool.features.teamresource.TeamResourceState;
+import mindustrytool.features.visualizer.VisualizerFeature;
+import mindustrytool.features.visualizer.VisualizerFeature.BridgeFlowState;
+import mindustrytool.test.MindustryTestEnv;
+import solim.overlay.DockCandidate;
+import solim.overlay.DockEngine;
+import solim.overlay.DockGuideRenderer;
+import solim.overlay.DockSide;
+import solim.overlay.DockTarget;
+
+class RenderLoopAllocationTest extends MindustryTestEnv {
+
+    private UI prevUi;
+    private GameState prevState;
+    private Camera prevCamera;
+    private ThreadMXBean threadBean;
+    private long threadId;
+
+    @BeforeEach
+    void setUp() throws Exception {
+        prevUi = Vars.ui;
+        prevState = Vars.state;
+        prevCamera = Core.camera;
+
+        if (Core.graphics == null) {
+            Core.graphics = new MockGraphics();
+        }
+        Core.camera = new Camera();
+        Core.camera.width = 800f;
+        Core.camera.height = 600f;
+        Core.camera.position.set(400f, 300f);
+
+        if (Vars.content == null) {
+            Vars.content = new ContentLoader();
+        }
+
+        Vars.state = new GameState();
+        Vars.state.rules = new Rules();
+        Vars.state.set(State.playing);
+
+        Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+        Field f = unsafeClass.getDeclaredField("theUnsafe");
+        f.setAccessible(true);
+        Object unsafe = f.get(null);
+        Method allocateInstance = unsafeClass.getMethod("allocateInstance", Class.class);
+
+        Vars.ui = (UI) allocateInstance.invoke(unsafe, UI.class);
+        Vars.ui.hudfrag = (HudFragment) allocateInstance.invoke(unsafe, HudFragment.class);
+        Vars.ui.hudfrag.shown = true;
+
+        java.lang.management.ThreadMXBean baseBean = ManagementFactory.getThreadMXBean();
+        assertTrue(baseBean instanceof ThreadMXBean, "ThreadMXBean must support memory tracking");
+        threadBean = (ThreadMXBean) baseBean;
+        if (threadBean.isThreadAllocatedMemorySupported() && !threadBean.isThreadAllocatedMemoryEnabled()) {
+            threadBean.setThreadAllocatedMemoryEnabled(true);
+        }
+        threadId = Thread.currentThread().getId();
+    }
+
+    @AfterEach
+    void tearDown() {
+        Vars.ui = prevUi;
+        Vars.state = prevState;
+        Core.camera = prevCamera;
+    }
+
+    @Test
+    void testThreadMxBeanTrackingEnabled() {
+        assertTrue(threadBean.isThreadAllocatedMemorySupported());
+        assertTrue(threadBean.isThreadAllocatedMemoryEnabled());
+        long bytes = threadBean.getThreadAllocatedBytes(threadId);
+        assertTrue(bytes >= 0L);
+    }
+
+    @Test
+    void testVisualizerBridgeFlowStateZeroAllocation() {
+        BridgeFlowState state = new BridgeFlowState();
+
+        for (int i = 0; i < 100; i++) {
+            state.step(10f * i);
+            state.addItem(2.5f);
+            float rate = state.calculateRate();
+            state.formatRate(rate);
+        }
+
+        long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        for (int frame = 0; frame < 60; frame++) {
+            state.step(1000f + frame * 10f);
+            state.addItem(3.0f);
+            float rate = state.calculateRate();
+            String formatted = state.formatRate(rate);
+
+            assertTrue(formatted != null && !formatted.isEmpty());
+        }
+        long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        long allocated = endAlloc - startAlloc;
+
+        assertEquals(0L, allocated, "BridgeFlowState steady-state steps must allocate 0 bytes on heap");
+    }
+
+    @Test
+    void testVisualizerFormatFlowRateLookupTableZeroAllocation() {
+
+        for (int i = 0; i <= 100; i++) {
+            VisualizerFeature.formatFlowRate((float) i);
+            VisualizerFeature.formatFlowRate(0.0005f);
+        }
+
+        long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        for (int iter = 0; iter < 1000; iter++) {
+            int rateInt = iter % 101;
+            String text = VisualizerFeature.formatFlowRate((float) rateInt);
+            assertTrue(text != null && text.endsWith("/s"));
+        }
+        long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        long allocated = endAlloc - startAlloc;
+
+        assertEquals(0L, allocated, "formatFlowRate lookup table queries must allocate 0 bytes");
+    }
+
+    @Test
+    void testVisualizerBadgeAndTargetCalculationsZeroAllocation() {
+        VisualizerFeature feature = new VisualizerFeature();
+
+        for (int i = 0; i < 50; i++) {
+            feature.calculateBadgeSize(1 + (i % 4));
+            feature.getTargetHealthFraction(null);
+            feature.calculateAmmoFraction(null);
+        }
+
+        long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        for (int frame = 0; frame < 60; frame++) {
+            float badgeSize = feature.calculateBadgeSize(2);
+            float healthFrac = feature.getTargetHealthFraction(null);
+            float ammoFrac = feature.calculateAmmoFraction(null);
+
+            assertTrue(badgeSize > 0f);
+            assertEquals(1f, healthFrac, 0.001f);
+            assertEquals(1f, ammoFrac, 0.001f);
+        }
+        long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        long allocated = endAlloc - startAlloc;
+
+        assertEquals(0L, allocated, "Turret badge and target metric calculations must allocate 0 bytes");
+    }
+
+    @Test
+    void testRangeDisplayFrustumCullingCalculationZeroAllocation() {
+        Rect viewBounds = new Rect(0f, 0f, 800f, 600f);
+
+        float[] unitX = { 100f, 400f, 750f, 1500f, -200f };
+        float[] unitY = { 100f, 300f, 550f, 1200f, -300f };
+        float range = 120f;
+
+        for (int i = 0; i < 100; i++) {
+            for (int u = 0; u < unitX.length; u++) {
+                boolean culled = unitX[u] + range < viewBounds.x || unitX[u] - range > viewBounds.x + viewBounds.width
+                        || unitY[u] + range < viewBounds.y || unitY[u] - range > viewBounds.y + viewBounds.height;
+                assertTrue(culled || !culled);
+            }
+        }
+
+        long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        int culledCount = 0;
+        for (int frame = 0; frame < 60; frame++) {
+            for (int u = 0; u < unitX.length; u++) {
+                boolean culled = unitX[u] + range < viewBounds.x || unitX[u] - range > viewBounds.x + viewBounds.width
+                        || unitY[u] + range < viewBounds.y || unitY[u] - range > viewBounds.y + viewBounds.height;
+                if (culled) {
+                    culledCount++;
+                }
+            }
+        }
+        long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        long allocated = endAlloc - startAlloc;
+
+        assertEquals(0L, allocated, "Frustum culling bounds checks must allocate 0 bytes");
+        assertEquals(120, culledCount, "2 out of 5 entities culled * 60 frames = 120");
+    }
+
+    @Test
+    void testHealthBarMetricsAndColorInterpolationZeroAllocation() {
+        Color scratchColor = new Color();
+        Color teamColor = Color.royal;
+
+        for (int i = 0; i < 100; i++) {
+            float hpPercent = (i % 100) / 100f;
+            scratchColor.set(teamColor).lerp(Color.scarlet, 1f - hpPercent);
+        }
+
+        float lastHpPercent = 0f;
+
+        long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        for (int frame = 0; frame < 60; frame++) {
+            float health = 150f;
+            float maxHealth = 300f;
+            lastHpPercent = Mathf.clamp(health / maxHealth, 0f, 1f);
+            scratchColor.set(teamColor).lerp(Color.scarlet, 1f - lastHpPercent);
+        }
+        long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        long allocated = endAlloc - startAlloc;
+
+        assertEquals(0.5f, lastHpPercent, 0.001f);
+        assertEquals(0L, allocated, "Health bar metric and color calculations must allocate 0 bytes");
+    }
+
+    @Test
+    void testBlockStatsEfficiencyZeroAllocation() {
+
+        String[] percentStrings = new String[301];
+        for (int i = 0; i <= 300; i++) {
+            percentStrings[i] = i + "%";
+        }
+
+        float[] testEfficiencies = { 0f, 0.45f, 0.85f, 1.0f, 1.5f, 2.25f, 3.5f };
+
+        for (int i = 0; i < 100; i++) {
+            float eff = testEfficiencies[i % testEfficiencies.length];
+            int effInt = Mathf.clamp(Math.round(eff * 100f), 0, 300);
+            String effText = percentStrings[effInt];
+            Color effColor = effInt >= 95 ? Color.green : (effInt > 50 ? Color.orange : Color.scarlet);
+            assertNotNull(effText);
+            assertNotNull(effColor);
+        }
+
+        long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        for (int frame = 0; frame < 60; frame++) {
+            for (float eff : testEfficiencies) {
+                int effInt = Mathf.clamp(Math.round(eff * 100f), 0, 300);
+                String effText = percentStrings[effInt];
+                Color effColor = effInt >= 95 ? Color.green : (effInt > 50 ? Color.orange : Color.scarlet);
+                assertNotNull(effText);
+                assertNotNull(effColor);
+            }
+        }
+        long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        long allocated = endAlloc - startAlloc;
+
+        assertEquals(0L, allocated, "Block stats efficiency lookup and color selection must allocate 0 bytes");
+    }
+
+    private static final class StaticDockTarget implements DockTarget {
+        private final String id;
+        private final float x;
+        private final float y;
+        private final float width;
+        private final float height;
+
+        private StaticDockTarget(String id, float x, float y, float width, float height) {
+            this.id = id;
+            this.x = x;
+            this.y = y;
+            this.width = width;
+            this.height = height;
+        }
+
+        @Override
+        public String id() {
+            return id;
+        }
+
+        @Override
+        public float x() {
+            return x;
+        }
+
+        @Override
+        public float y() {
+            return y;
+        }
+
+        @Override
+        public float width() {
+            return width;
+        }
+
+        @Override
+        public float height() {
+            return height;
+        }
+
+        @Override
+        public boolean active() {
+            return true;
+        }
+
+        @Override
+        public boolean supports(DockSide side) {
+            return side == DockSide.BOTTOM;
+        }
+    }
+
+    @Test
+    void testDockedHudIdleFrameZeroAllocation() {
+        DockGuideRenderer guide = new DockGuideRenderer();
+        DockEngine engine = new DockEngine();
+        DockTarget target = new StaticDockTarget("minimap", 100f, 100f, 200f, 100f);
+        engine.register(target);
+        DockCandidate candidate = new DockCandidate(target, DockSide.BOTTOM, 150f, 46f, 50f, 0f);
+
+        for (int frame = 0; frame < 100; frame++) {
+            guide.draw();
+            engine.breaksAway(candidate, 150f, 46f);
+            engine.find("minimap");
+        }
+
+        long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        for (int frame = 0; frame < 60; frame++) {
+            guide.draw();
+            engine.breaksAway(candidate, 150f + frame % 10, 46f);
+            engine.find("minimap");
+        }
+        long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        long allocated = endAlloc - startAlloc;
+
+        assertEquals(0L, allocated, "An idle docked HUD frame must allocate 0 bytes on heap");
+        assertNotNull(engine.find("minimap"));
+    }
+
+    @Test
+    void testTeamResourceStateUpdateSteadyStateZeroAllocation() {
+        TeamResourceFeature feature = new TeamResourceFeature();
+        TeamResourceState state = feature.getState();
+
+        for (int frame = 0; frame < 60; frame++) {
+            state.update();
+        }
+
+        long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        for (int frame = 0; frame < 60; frame++) {
+            state.update();
+        }
+        long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+        long allocated = endAlloc - startAlloc;
+
+        assertEquals(0L, allocated, "TeamResourceState steady-state update must allocate 0 bytes on heap");
+    }
+
+    @Test
+    void testTeamResourceSplitBarDrawSteadyStateZeroAllocation() {
+        if (Tex.whiteui == null) {
+            Tex.whiteui = new TextureRegionDrawable(new TextureRegion());
+        }
+        if (Styles.black8 == null) {
+            Styles.black8 = new TextureRegionDrawable(new TextureRegion());
+        }
+        if (Fonts.outline == null) {
+            FontData fontData = new FontData() {
+                @Override
+                public Glyph getGlyph(char ch) {
+                    Glyph g = new Glyph();
+                    g.id = ch;
+                    g.width = 8;
+                    g.height = 10;
+                    g.xadvance = 9;
+                    return g;
+                }
+            };
+            fontData.lineHeight = 18f;
+            fontData.capHeight = 14f;
+            Fonts.outline = new Font(fontData, new TextureRegion(), false);
+        }
+
+        Scene prevScene = Core.scene;
+        Batch prevBatch = Core.batch;
+        try {
+            if (Core.batch == null) {
+                Core.batch = new Batch() {
+                    @Override
+                    protected void draw(TextureRegion region, float x, float y, float originX, float originY, float width, float height, float rotation) {}
+
+                    @Override
+                    protected void draw(Texture texture, float[] spriteVertices, int offset, int count) {}
+
+                    @Override
+                    protected void flush() {}
+                };
+            }
+            if (Core.scene == null) {
+                Core.scene = new Scene();
+            }
+            LabelStyle labelStyle = new LabelStyle(Fonts.outline, Color.white);
+            Core.scene.addStyle(LabelStyle.class, labelStyle);
+
+            TeamResourceFeature feature = new TeamResourceFeature();
+            TeamResourceState state = feature.getState();
+            SplitBar splitBar = new SplitBar(state, () -> 1f);
+            Element barElement = splitBar.element();
+            barElement.setSize(200f, 20f);
+
+            for (int frame = 0; frame < 60; frame++) {
+                barElement.draw();
+            }
+
+            long startAlloc = threadBean.getThreadAllocatedBytes(threadId);
+            for (int frame = 0; frame < 60; frame++) {
+                barElement.draw();
+            }
+            long endAlloc = threadBean.getThreadAllocatedBytes(threadId);
+            long allocated = endAlloc - startAlloc;
+
+            assertEquals(0L, allocated, "SplitBar steady-state draw must allocate 0 bytes on heap");
+        } finally {
+            Core.scene = prevScene;
+            Core.batch = prevBatch;
+        }
+    }
+}

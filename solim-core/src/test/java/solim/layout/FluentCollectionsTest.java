@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static solim.modifier.Values.gap;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -16,8 +17,10 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.junit.jupiter.api.Test;
 
+import arc.func.Func;
+import arc.func.Func2;
+import arc.func.Prov;
 import arc.scene.Element;
-import solim.core.BaseComponent;
 import solim.core.Component;
 import solim.reactive.ForEach;
 import solim.reactive.Readable;
@@ -28,7 +31,7 @@ import solim.test.SolimEnv;
 
 class FluentCollectionsTest extends SolimEnv {
 
-    static class ItemComp extends BaseComponent {
+    static class ItemComp extends Component {
         final String id;
         boolean disposed = false;
 
@@ -56,13 +59,13 @@ class FluentCollectionsTest extends SolimEnv {
         final Map<String, ItemComp> created = new HashMap<String, ItemComp>();
 
         ReactiveGrid<String> grid = new ReactiveGrid<String>(items);
-        grid.columns(cols).key(new arc.func.Func<String, Object>() {
+        grid.columns(cols).key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
-        }).gap(8f);
-        grid.children(new arc.func.Func<String, Component>() {
+        }).props(gap(8f));
+        grid.items(new Func<String, Component>() {
             @Override
             public Component get(String item) {
                 ItemComp c = new ItemComp(item);
@@ -99,13 +102,13 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(Arrays.asList("A", "B"));
         final AtomicReference<GridItemContext> captured = new AtomicReference<GridItemContext>();
         ReactiveGrid<String> grid = new ReactiveGrid<String>(items);
-        grid.key(new arc.func.Func<String, Object>() {
+        grid.key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        grid.children(new arc.func.Func2<String, GridItemContext, Component>() {
+        grid.items(new Func2<String, GridItemContext, Component>() {
             @Override
             public Component get(String item, GridItemContext ctx) {
                 captured.set(ctx);
@@ -126,13 +129,13 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(Arrays.asList("A"));
         final AtomicReference<GridItemContext> captured = new AtomicReference<GridItemContext>();
         ReactiveGrid<String> grid = new ReactiveGrid<String>(items);
-        grid.columns(cols).key(new arc.func.Func<String, Object>() {
+        grid.columns(cols).key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        grid.children(new arc.func.Func2<String, GridItemContext, Component>() {
+        grid.items(new Func2<String, GridItemContext, Component>() {
             @Override
             public Component get(String item, GridItemContext ctx) {
                 captured.set(ctx);
@@ -150,13 +153,13 @@ class FluentCollectionsTest extends SolimEnv {
     @Test
     void reactiveGridStaticIterableMounts() {
         ReactiveGrid<String> grid = ReactiveGrid.of(Readable.of(Arrays.asList("A", "B")));
-        grid.key(new arc.func.Func<String, Object>() {
+        grid.key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        grid.children(ItemComp::new);
+        grid.items(ItemComp::new);
         grid.element();
         SignalDispatcher.flush();
         assertEquals(2, grid.table().getChildren().size);
@@ -168,13 +171,13 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(new ArrayList<String>(Arrays.asList("A", "B", "C")));
         final Map<String, ItemComp> created = new HashMap<String, ItemComp>();
         ReactiveGrid<String> grid = new ReactiveGrid<String>(items);
-        grid.columns(2).key(new arc.func.Func<String, Object>() {
+        grid.columns(2).key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        grid.children(new arc.func.Func<String, Component>() {
+        grid.items(new Func<String, Component>() {
             @Override
             public Component get(String item) {
                 ItemComp c = new ItemComp(item);
@@ -202,7 +205,7 @@ class FluentCollectionsTest extends SolimEnv {
     void reactiveGridEmptyRendersWhenEmptyAndReplacedWhenNonEmpty() {
         Signal<List<String>> items = Signal.of(Collections.<String>emptyList());
         ReactiveGrid<String> grid = new ReactiveGrid<String>(items);
-        grid.columns(2).key(new arc.func.Func<String, Object>() {
+        grid.columns(2).key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
@@ -216,7 +219,7 @@ class FluentCollectionsTest extends SolimEnv {
                 AttachmentStack.add(el);
             }
         });
-        grid.children(ItemComp::new);
+        grid.items(ItemComp::new);
         grid.element();
         SignalDispatcher.flush();
         assertEquals(1, grid.table().getChildren().size);
@@ -232,13 +235,13 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(Collections.<String>emptyList());
         final AtomicInteger emptyDisposals = new AtomicInteger();
         ReactiveGrid<String> grid = new ReactiveGrid<String>(items);
-        grid.columns(2).key(new arc.func.Func<String, Object>() {
+        grid.columns(2).key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        grid.emptyView(new arc.func.Prov<Component>() {
+        grid.emptyView(new Prov<Component>() {
             @Override
             public Component get() {
                 ItemComp c = new ItemComp("empty") {
@@ -251,7 +254,7 @@ class FluentCollectionsTest extends SolimEnv {
                 return c;
             }
         });
-        grid.children(ItemComp::new);
+        grid.items(ItemComp::new);
         grid.element();
         SignalDispatcher.flush();
         assertEquals(1, grid.table().getChildren().size);
@@ -268,7 +271,7 @@ class FluentCollectionsTest extends SolimEnv {
     void missingFactoryRendersEmptyAndLaterChildrenRefreshesBuiltContent() {
         Signal<List<String>> items = Signal.of(Arrays.asList("A", "B"));
         ReactiveGrid<String> grid = new ReactiveGrid<String>(items);
-        grid.columns(2).key(new arc.func.Func<String, Object>() {
+        grid.columns(2).key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
@@ -278,7 +281,7 @@ class FluentCollectionsTest extends SolimEnv {
         SignalDispatcher.flush();
         assertEquals(0, grid.table().getChildren().size);
 
-        grid.children(ItemComp::new);
+        grid.items(ItemComp::new);
         SignalDispatcher.flush();
         assertEquals(2, grid.table().getChildren().size);
         grid.dispose();
@@ -288,7 +291,7 @@ class FluentCollectionsTest extends SolimEnv {
     void forEachMissingFactoryRendersEmptyAndLaterChildrenRefreshes() {
         Signal<List<String>> items = Signal.of(Arrays.asList("A"));
         ForEach<String> fe = new ForEach<String>(items);
-        fe.key(new arc.func.Func<String, Object>() {
+        fe.key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
@@ -298,7 +301,7 @@ class FluentCollectionsTest extends SolimEnv {
         SignalDispatcher.flush();
         assertEquals(0, fe.container().getChildren().size);
 
-        fe.children(ItemComp::new);
+        fe.items(ItemComp::new);
         SignalDispatcher.flush();
         assertEquals(1, fe.container().getChildren().size);
         fe.dispose();
@@ -309,7 +312,7 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(new ArrayList<String>(Arrays.asList("A", "B")));
         final Map<String, ItemComp> created = new HashMap<String, ItemComp>();
         ForEach<String> fe = new ForEach<String>(items);
-        fe.children(new arc.func.Func<String, Component>() {
+        fe.items(new Func<String, Component>() {
             @Override
             public Component get(String item) {
                 ItemComp c = new ItemComp(item);
@@ -333,13 +336,13 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(new ArrayList<String>(Arrays.asList("A", "B", "C")));
         final Map<String, ItemComp> created = new HashMap<String, ItemComp>();
         ForEach<String> fe = new ForEach<String>(items);
-        fe.key(new arc.func.Func<String, Object>() {
+        fe.key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        fe.children(new arc.func.Func<String, Component>() {
+        fe.items(new Func<String, Component>() {
             @Override
             public Component get(String item) {
                 ItemComp c = new ItemComp(item);
@@ -364,13 +367,13 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(new ArrayList<String>(Arrays.asList("A", "B")));
         final Map<String, ItemComp> created = new HashMap<String, ItemComp>();
         ForEach<String> fe = new ForEach<String>(items);
-        fe.key(new arc.func.Func<String, Object>() {
+        fe.key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        fe.children(new arc.func.Func<String, Component>() {
+        fe.items(new Func<String, Component>() {
             @Override
             public Component get(String item) {
                 ItemComp c = new ItemComp(item);
@@ -404,19 +407,19 @@ class FluentCollectionsTest extends SolimEnv {
                 return 50f;
             }
         });
-        vl.key(new arc.func.Func<String, Object>() {
+        vl.key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        vl.overscan(2).gap(0f);
+        vl.overscan(2).props(gap(0f));
         vl.onReachTop(50f, new Runnable() {
             @Override
             public void run() {
             }
         });
-        vl.children(ItemComp::new);
+        vl.items(ItemComp::new);
         vl.element();
         SignalDispatcher.flush();
         assertEquals(5000f, vl.getTotalHeight(), 0.001f);
@@ -438,18 +441,18 @@ class FluentCollectionsTest extends SolimEnv {
                 return 50f;
             }
         });
-        vl.key(new arc.func.Func<String, Object>() {
+        vl.key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        vl.overscan(2).gap(5f);
-        vl.children(ItemComp::new);
+        vl.overscan(2).props(gap(5f));
+        vl.items(ItemComp::new);
         vl.element();
         SignalDispatcher.flush();
         assertTrue(vl.getMountedCount() >= 1);
-        vl.gap(10f);
+        vl.props(gap(10f));
         SignalDispatcher.flush();
         assertTrue(vl.getMountedCount() >= 1);
         vl.dispose();
@@ -461,13 +464,13 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(new ArrayList<String>(Arrays.asList("A", "B")));
         final Map<String, ItemComp> created = new HashMap<String, ItemComp>();
         ReactiveGrid<String> grid = new ReactiveGrid<String>(items);
-        grid.columns(cols).key(new arc.func.Func<String, Object>() {
+        grid.columns(cols).key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        grid.children(new arc.func.Func<String, Component>() {
+        grid.items(new Func<String, Component>() {
             @Override
             public Component get(String item) {
                 ItemComp c = new ItemComp(item);
@@ -491,13 +494,13 @@ class FluentCollectionsTest extends SolimEnv {
         Signal<List<String>> items = Signal.of(new ArrayList<String>(Arrays.asList("A")));
         final AtomicInteger disposals = new AtomicInteger();
         ForEach<String> fe = new ForEach<String>(items);
-        fe.key(new arc.func.Func<String, Object>() {
+        fe.key(new Func<String, Object>() {
             @Override
             public Object get(String s) {
                 return s;
             }
         });
-        fe.children(new arc.func.Func<String, Component>() {
+        fe.items(new Func<String, Component>() {
             @Override
             public Component get(String item) {
                 return new ItemComp(item) {
@@ -514,5 +517,95 @@ class FluentCollectionsTest extends SolimEnv {
         fe.dispose();
         fe.dispose();
         assertEquals(1, disposals.get());
+    }
+
+    @Test
+    void reactiveGridReflowsWhenBuiltBeforeColumnsAndSignalChanges() {
+        Signal<Integer> cols = Signal.of(2);
+        Signal<List<String>> items = Signal.of(new ArrayList<>(Arrays.asList("A", "B", "C", "D")));
+
+        ReactiveGrid<String> grid = new ReactiveGrid<>(items);
+
+        grid.element();
+
+        grid.columns(cols);
+        grid.items(ItemComp::new);
+
+        assertEquals(4, grid.table().getChildren().size);
+
+        cols.set(4);
+        SignalDispatcher.flush();
+
+        assertEquals(4, grid.table().getChildren().size);
+        assertEquals(4, grid.context().columnCount().get().intValue());
+
+        grid.dispose();
+    }
+
+    @Test
+    void reactiveGridReflowsWhenColumnsConfiguredAtRuntimeOnRetainedReference() {
+        Signal<List<String>> items = Signal.of(new ArrayList<>(Arrays.asList("1", "2", "3", "4", "5")));
+
+        ReactiveGrid<String> grid = new ReactiveGrid<>(items);
+        grid.columns(2);
+        grid.items(ItemComp::new);
+        grid.element();
+
+        assertEquals(5, grid.table().getChildren().size);
+        assertEquals(2, grid.context().columnCount().get().intValue());
+
+        grid.columns(5);
+        SignalDispatcher.flush();
+
+        assertEquals(5, grid.table().getChildren().size);
+        assertEquals(5, grid.context().columnCount().get().intValue());
+
+        grid.dispose();
+    }
+
+    @Test
+    void reactiveGridContextItemWidthAndColumnCountTrackSignalChanges() {
+        Signal<Integer> cols = Signal.of(2);
+        Signal<List<String>> items = Signal.of(new ArrayList<>(Arrays.asList("A", "B")));
+        AtomicReference<GridItemContext> capturedCtx = new AtomicReference<>();
+
+        ReactiveGrid<String> grid = new ReactiveGrid<>(items);
+        grid.element();
+        grid.columns(cols);
+        grid.items((item, ctx) -> {
+            capturedCtx.set(ctx);
+            return new ItemComp(item);
+        });
+
+        assertNotNull(capturedCtx.get());
+        assertEquals(2, capturedCtx.get().columnCount().get().intValue());
+
+        cols.set(3);
+        SignalDispatcher.flush();
+
+        assertEquals(3, capturedCtx.get().columnCount().get().intValue());
+
+        grid.dispose();
+    }
+
+    @Test
+    void forEachUpdatesWhenBuiltBeforeChildrenAndCollectionChanges() {
+        Signal<List<String>> items = Signal.of(new ArrayList<>(Arrays.asList("A", "B")));
+
+        ForEach<String> fe = new ForEach<>(items);
+
+        fe.element();
+
+        fe.items(ItemComp::new);
+        SignalDispatcher.flush();
+
+        assertEquals(2, fe.container().getChildren().size);
+
+        items.set(new ArrayList<>(Arrays.asList("A", "B", "C")));
+        SignalDispatcher.flush();
+
+        assertEquals(3, fe.container().getChildren().size);
+
+        fe.dispose();
     }
 }

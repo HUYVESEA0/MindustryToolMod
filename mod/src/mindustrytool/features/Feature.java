@@ -8,13 +8,14 @@ import arc.input.KeyCode;
 import arc.scene.Element;
 import arc.struct.Seq;
 import arc.util.Nullable;
+import mindustrytool.Config;
 import solim.config.ConfigGroup;
 import solim.overlay.SolimDialog;
 import solim.reactive.Readable;
 import solim.reactive.Signal;
 
 public abstract class Feature {
-	private static final String KEYBIND_CATEGORY = "MindustryTool";
+	private static final String KEYBIND_CATEGORY = "mindustrytool";
 
 	private final FeatureMetadata metadata;
 	private @Nullable Signal<Boolean> enabled;
@@ -188,5 +189,13 @@ public abstract class Feature {
 			return Core.bundle.get(helpKey);
 		}
 		return "";
+	}
+
+	public @Nullable String getPreviewVideoUrl() {
+		String id = getMetadata().getId();
+		if (id == null || id.trim().isEmpty()) {
+			return null;
+		}
+		return Config.PREVIEW_VIDEO_BASE_URL + id + ".mp4";
 	}
 }

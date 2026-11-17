@@ -12,11 +12,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import arc.func.Boolf;
 import arc.func.Prov;
+import arc.struct.Seq;
 import mindustrytool.models.response.ChannelDto;
+import mindustrytool.models.response.ChatDeleteEvent;
 import mindustrytool.models.response.ChatMessage;
+import mindustrytool.models.response.ChatStreamEvent;
 import mindustrytool.models.response.UserData;
 import mindustrytool.services.MindustryTool;
 import mindustrytool.utils.JsonUtils;
@@ -25,11 +30,11 @@ import solim.reactive.Effect;
 public class ChatService {
 
     public static final int PAGE_SIZE = 50;
-    public static final long WATCHDOG_TIMEOUT_MS = 5 * 60 * 1000L;
+    public static final long WATCHDOG_TIMEOUT_MS = 30 * 60 * 1000L;
     public static final float WATCHDOG_INTERVAL_SECONDS = 5f;
 
     private final ChatStore store;
-    private final Prov<Boolean> windowOpenSupplier;
+    private final Boolf<String> feedVisiblePredicate;
     private final AtomicBoolean running = new AtomicBoolean(false);
     private final String chatId = UUID.randomUUID().toString();
 
@@ -43,10 +48,16 @@ public class ChatService {
     private @Nullable String lastAutoLoadedChannelId;
     private final Effect autoLoadEffect;
     private final Effect unreadEffect;
+    private final Seq<CompletableFuture<?>> activeRequests = new Seq<>();
 
     public ChatService(ChatStore store, Prov<Boolean> windowOpenSupplier) {
+        this(store,
+                channelId -> windowOpenSupplier.get() && Objects.equals(store.channels().currentActiveId(), channelId));
+    }
+
+    public ChatService(ChatStore store, Boolf<String> feedVisiblePredicate) {
         this.store = store;
-        this.windowOpenSupplier = windowOpenSupplier;
+        this.feedVisiblePredicate = feedVisiblePredicate;
 
         autoLoadEffect = Effect.of(() -> {
             String channelId = store.channels().activeId().get();
@@ -111,15 +122,18 @@ public class ChatService {
             }
             streamRequest = null;
         }
+        synchronized (this) {
+            for (CompletableFuture<?> req : activeRequests) {
+                try {
+                    req.cancel(true);
+                } catch (Exception ignored) {
+                }
+            }
+            activeRequests.clear();
+        }
         Core.app.post(() -> store.session().setConnected(false));
     }
 
-    /**
-     * Releases the reactive effects owned by this service. Terminal: the
-     * service must not be started again afterwards. Production instances live
-     * for the application lifetime; tests call this in teardown so leaked
-     * effects do not pollute the shared dispatcher across tests.
-     */
     public void dispose() {
         autoLoadEffect.dispose();
         unreadEffect.dispose();
@@ -129,6 +143,21 @@ public class ChatService {
         Throwable cause = throwable.getCause() != null ? throwable.getCause() : throwable;
         String msg = cause.getMessage();
         return (msg != null && !msg.trim().isEmpty()) ? msg.trim() : cause.getClass().getSimpleName();
+    }
+
+    private static boolean isCancelled(Throwable throwable) {
+        return throwable instanceof CancellationException
+                || (throwable.getCause() instanceof CancellationException);
+    }
+
+    private synchronized <T> CompletableFuture<T> trackRequest(CompletableFuture<T> future) {
+        activeRequests.add(future);
+        future.whenComplete((res, err) -> {
+            synchronized (ChatService.this) {
+                activeRequests.remove(future, true);
+            }
+        });
+        return future;
     }
 
     public void refreshChannels() {
@@ -158,7 +187,7 @@ public class ChatService {
             store.messages().setLoadingInitial(channelId, true);
         }
 
-        MindustryTool.getChatMessages(channelId, null).thenAccept(messages -> {
+        trackRequest(MindustryTool.getChatMessages(channelId, null)).thenAccept(messages -> {
             Core.app.post(() -> {
                 store.messages().setLoadingInitial(channelId, false);
                 if (messages != null) {
@@ -170,9 +199,7 @@ public class ChatService {
                     ChatMessage newest = messages.get(messages.size() - 1);
                     if (newest.getId() != null) {
                         store.unread().setLatestMessage(channelId, newest.getId());
-                        boolean open = windowOpenSupplier.get();
-                        boolean isActive = Objects.equals(store.channels().currentActiveId(), channelId);
-                        if (open && isActive) {
+                        if (feedVisiblePredicate.get(channelId)) {
                             store.unread().markAsRead(channelId, newest.getId());
                         }
                     }
@@ -180,6 +207,9 @@ public class ChatService {
                 fetchMissingUsers(messages);
             });
         }).exceptionally(e -> {
+            if (isCancelled(e)) {
+                return null;
+            }
             Core.app.post(() -> {
                 store.messages().setLoadingInitial(channelId, false);
                 if (!hasExisting) {
@@ -196,7 +226,7 @@ public class ChatService {
         if (activeId != null && !activeId.isEmpty()) {
             syncActiveChannelSilently(activeId);
         }
-        MindustryTool.getChatChannels().thenAccept(channels -> {
+        trackRequest(MindustryTool.getChatChannels()).thenAccept(channels -> {
             Core.app.post(() -> {
                 store.channels().replace(channels);
                 if (channels != null) {
@@ -208,6 +238,9 @@ public class ChatService {
                 }
             });
         }).exceptionally(e -> {
+            if (isCancelled(e)) {
+                return null;
+            }
             Log.err("Failed to catch up chat channels metadata", e);
             return null;
         });
@@ -242,7 +275,7 @@ public class ChatService {
         store.messages().setLoadingInitial(channelId, true);
         store.messages().setError(channelId, null);
 
-        MindustryTool.getChatMessages(channelId, null).thenAccept(messages -> {
+        trackRequest(MindustryTool.getChatMessages(channelId, null)).thenAccept(messages -> {
             Core.app.post(() -> {
                 store.messages().setLoadingInitial(channelId, false);
                 if (messages != null) {
@@ -254,9 +287,7 @@ public class ChatService {
                     ChatMessage newest = messages.get(messages.size() - 1);
                     if (newest.getId() != null) {
                         store.unread().setLatestMessage(channelId, newest.getId());
-                        boolean open = windowOpenSupplier.get();
-                        boolean isActive = Objects.equals(store.channels().currentActiveId(), channelId);
-                        if (open && isActive) {
+                        if (feedVisiblePredicate.get(channelId)) {
                             store.unread().markAsRead(channelId, newest.getId());
                         }
                     }
@@ -264,6 +295,9 @@ public class ChatService {
                 fetchMissingUsers(messages);
             });
         }).exceptionally(e -> {
+            if (isCancelled(e)) {
+                return null;
+            }
             Core.app.post(() -> {
                 store.messages().setLoadingInitial(channelId, false);
                 store.messages().setError(channelId, extractError(e));
@@ -292,7 +326,7 @@ public class ChatService {
         String oldestId = currentMsgs.get(0).getId();
         store.messages().setLoadingOlder(true);
 
-        MindustryTool.getChatMessages(channelId, oldestId).thenAccept(older -> {
+        trackRequest(MindustryTool.getChatMessages(channelId, oldestId)).thenAccept(older -> {
             Core.app.post(() -> {
                 store.messages().setLoadingOlder(false);
                 if (older == null || older.isEmpty()) {
@@ -307,6 +341,9 @@ public class ChatService {
                 }
             });
         }).exceptionally(e -> {
+            if (isCancelled(e)) {
+                return null;
+            }
             Core.app.post(() -> store.messages().setLoadingOlder(false));
             Log.err("Failed to fetch older chat messages for " + channelId, e);
             return null;
@@ -422,18 +459,17 @@ public class ChatService {
                 if (list != null) {
                     Core.app.post(() -> {
                         store.session().setConnected(true);
-                        boolean open = windowOpenSupplier.get();
                         for (ChatMessage msg : list) {
                             boolean added = store.messages().append(msg);
                             if (added) {
-                                boolean isActive = Objects.equals(store.channels().currentActiveId(),
-                                        msg.getChannelId());
+                                boolean isVisible = feedVisiblePredicate.get(msg.getChannelId());
+                                int countBefore = store.unread().get(msg.getChannelId());
                                 if (msg.getId() != null) {
                                     store.unread().setLatestMessage(msg.getChannelId(), msg.getId());
                                 }
-                                if (open && isActive) {
+                                if (isVisible) {
                                     store.unread().markAsRead(msg.getChannelId(), msg.getId());
-                                } else {
+                                } else if (store.unread().get(msg.getChannelId()) == countBefore) {
                                     store.unread().increment(msg.getChannelId());
                                 }
                             }
@@ -442,23 +478,41 @@ public class ChatService {
                     });
                 }
             } else if (data.startsWith("{")) {
-                ChatMessage msg = JsonUtils.fromJson(ChatMessage.class, data);
-                if (msg != null && msg.getId() != null) {
-                    Core.app.post(() -> {
-                        store.session().setConnected(true);
-                        boolean added = store.messages().append(msg);
-                        if (added) {
-                            boolean open = windowOpenSupplier.get();
-                            boolean isActive = Objects.equals(store.channels().currentActiveId(), msg.getChannelId());
-                            store.unread().setLatestMessage(msg.getChannelId(), msg.getId());
-                            if (open && isActive) {
-                                store.unread().markAsRead(msg.getChannelId(), msg.getId());
-                            } else {
-                                store.unread().increment(msg.getChannelId());
+                ChatStreamEvent streamEvent = JsonUtils.fromJson(ChatStreamEvent.class, data);
+                if (streamEvent instanceof ChatStreamEvent.Message) {
+                    ChatMessage msg = ((ChatStreamEvent.Message) streamEvent).getData();
+                    if (msg != null && msg.getId() != null) {
+                        Core.app.post(() -> {
+                            store.session().setConnected(true);
+                            boolean added = store.messages().append(msg);
+                            if (added) {
+                                boolean isVisible = feedVisiblePredicate.get(msg.getChannelId());
+                                int countBefore = store.unread().get(msg.getChannelId());
+                                store.unread().setLatestMessage(msg.getChannelId(), msg.getId());
+                                if (isVisible) {
+                                    store.unread().markAsRead(msg.getChannelId(), msg.getId());
+                                } else if (store.unread().get(msg.getChannelId()) == countBefore) {
+                                    store.unread().increment(msg.getChannelId());
+                                }
                             }
-                        }
-                        fetchMissingUsers(Collections.singletonList(msg));
-                    });
+                            fetchMissingUsers(Collections.singletonList(msg));
+                        });
+                    }
+                } else if (streamEvent instanceof ChatStreamEvent.Delete) {
+                    ChatDeleteEvent del = ((ChatStreamEvent.Delete) streamEvent).getData();
+                    if (del != null && del.getId() != null) {
+                        Core.app.post(() -> {
+                            store.session().setConnected(true);
+                            store.messages().remove(del.getChannelId(), del.getId());
+                            if (store.ui().currentReplyTarget() != null
+                                    && Objects.equals(store.ui().currentReplyTarget().getId(), del.getId())) {
+                                store.ui().setReplyTarget(null);
+                            }
+                            if (del.getChannelId() != null && del.getLastMessageId() != null) {
+                                store.unread().setLatestMessage(del.getChannelId(), del.getLastMessageId());
+                            }
+                        });
+                    }
                 }
             }
         } catch (Exception e) {
@@ -480,9 +534,7 @@ public class ChatService {
             }
         }
         if (!missing.isEmpty()) {
-            // Network-only by contract: user profiles are fetched directly per
-            // batch with no long-term QueryCache retention. The store itself
-            // dedupes repeat authors within the session.
+
             MindustryTool.getUserBatch(missing).thenAccept(userDataList -> {
                 if (userDataList != null) {
                     Core.app.post(() -> store.users().putAll(userDataList));
