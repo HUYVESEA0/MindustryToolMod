@@ -24,7 +24,6 @@ import arc.graphics.g2d.TextureRegion;
 import arc.math.Mathf;
 import arc.math.geom.Rect;
 import arc.mock.MockGraphics;
-import arc.scene.Element;
 import arc.scene.Scene;
 import arc.scene.style.TextureRegionDrawable;
 import arc.scene.ui.Label.LabelStyle;
