@@ -44,6 +44,7 @@ import mindustrytool.features.wavepreview.WavePreviewFeature;
 import mindustrytool.features.browser.schematic.SchematicBrowserFeature;
 import mindustrytool.features.browser.map.MapBrowserFeature;
 import mindustrytool.features.browser.patch.PatchBrowserFeature;
+import mindustrytool.features.ui.modmanager.ModManagerFeature;
 import mindustrytool.features.maprules.MapRulesFeature;
 import mindustrytool.features.quickrotate.QuickRotateFeature;
 import mindustrytool.features.visualizer.VisualizerFeature;
@@ -100,6 +101,7 @@ public class Main extends Mod {
                 new CalloutFeature(),
                 new ResourceMonitorFeature(),
                 new TranslationFeature(),
+                new ModManagerFeature(),
                 new SchematicBrowserFeature(),
                 new MapBrowserFeature(),
                 new PatchBrowserFeature(),

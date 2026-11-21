@@ -13,6 +13,7 @@
 ### 🗺️ **Content Browser**
 - **Map Browser:** Access a curated, community-driven repository of verified maps directly in-game. Filter by size, mode, planet, and version.
 - **Schematic Browser:** Explore a vast library of community-shared schematics. Preview, download, or copy them to your clipboard with one click.
+- **Mod Manager & Modpack Studio:** Manage installed mods in a split Enabled/Disabled view with one-click update checks and content inspection, browse GitHub mods with local favorite folders, and build, install, or back up modpacks.
 - **Direct Integration:** Seamlessly browse, search, and import content without ever leaving the game interface.
 
 ### 🤖 **Automation (Autoplay)**
@@ -55,6 +56,7 @@ If you like the mod, please give it a star on GitHub. Thank you for supporting *
 ## **Credit to:**
 
 - **xpdustry:** for sharing claj
+- **[Helium](https://github.com/EB-wilson/Helium) (EB-wilson):** for Mod Manager & Modpack Studio design and inspiration
 
 **Translator:**
 
